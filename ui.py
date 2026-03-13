@@ -6,7 +6,7 @@ from rich.text import Text
 
 from models import ScanResult, ScanStats
 
-console = Console()
+console = Console(encoding="utf-8")
 
 BANNER = (
     " __  __      _ _ ____  _  __ _   \n"
