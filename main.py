@@ -23,9 +23,16 @@ import json
 import shutil
 import sys
 import logging
+import io
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    import os
+    os.environ["TERM"] = "xterm-256color"
 
 import click
 from rich import box

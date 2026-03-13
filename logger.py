@@ -11,8 +11,7 @@ def setup_logger(name: str) -> logging.Logger:
         
         # Console handler (for standard errors/debug)
         c_handler = logging.StreamHandler(sys.stdout)
-        c_handler.setLevel(logging.WARNING)
-        c_handler.encoding = "utf-8"  # Less verbose by default on console
+        c_handler.setLevel(logging.WARNING)  # Less verbose by default on console
         
         # File handler
         logs_dir = Path("logs")
