@@ -8,12 +8,18 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 - **Attachment protection**: Emails with attachments are never deleted
 - **Two scan modes**:
   - `fast` – heuristic keyword matching (blacklist/whitelist)
-  - `pro`  – heuristic + local Ollama LLM for smarter detection
+  - `pro`  – two-phase analysis: heuristic + local Ollama LLM for smarter detection
+    - Phase 1: Fast heuristic scan
+    - Phase 2: LLM verification on suspicious messages
+- **Body preview in Pro mode**: Fetches email body content for better LLM analysis
 - **Dry-run default** – preview before any deletion
+- **Delete options**: Permanent delete or move to Trash
 - **Concurrent fetching** – multi-threaded IMAP operations
+- **Auto worker calculation** – automatically calculates optimal thread count based on hardware
 - **Cache support** – skip re-fetching headers on repeat scans
-- **Rich CLI UI** – progress bars, tables, colored output
+- **Rich CLI UI** – progress bars, tables, colored output with Turkish/English
 - **Cleanup history** – view past deletion reports
+- **Logging** – detailed operation logs
 
 ## Install
 
@@ -36,9 +42,16 @@ python main.py --provider custom --mode fast \
     --username you@example.com --password "your-password" \
     --host imap.example.com --port 993
 
+# Pro mode with LLM (two-phase analysis)
+python main.py --provider gmail --mode pro \
+    --username you@gmail.com --password "app-password"
+
 # Real deletion (disable dry-run)
 python main.py --provider gmail --mode pro \
     --username you@gmail.com --password "app-password" --no-dry-run
+
+# Move to Trash instead of permanent delete
+# (select option 2 when prompted)
 
 # View cleanup history
 python main.py --history
@@ -52,6 +65,17 @@ python main.py --provider gmail --mode fast \
 python main.py --provider gmail --mode fast \
     --username you@gmail.com --password "app-password" \
     --export results.json
+
+# Custom Ollama settings
+python main.py --provider gmail --mode pro \
+    --username you@gmail.com --password "app-password" \
+    --ollama-url http://localhost:11434 \
+    --ollama-model qwen3.5:2B
+
+# Custom system prompt for LLM
+python main.py --provider gmail --mode pro \
+    --username you@gmail.com --password "app-password" \
+    --ollama-prompt "Custom prompt here"
 ```
 
 ## Options
@@ -66,12 +90,14 @@ python main.py --provider gmail --mode fast \
 | `--port` | Custom IMAP server port | 993 |
 | `--use-ssl` | Use SSL for IMAP | enabled |
 | `--dry-run` | Preview only (no deletion) | enabled |
+| `--no-dry-run` | Actually delete emails | - |
 | `--scan-limit` | Max messages to scan | all |
-| `--workers` | Concurrent IMAP threads | 8 |
 | `--ollama-url` | Ollama API URL | `http://localhost:11434` |
-| `--ollama-model` | Ollama model | `qwen2.5:3b` |
+| `--ollama-model` | Ollama model | `qwen3.5:2B` |
+| `--ollama-prompt` | Custom system prompt for LLM | default prompt |
 | `--history` | Show cleanup history | - |
 | `--export` | Export results to CSV/JSON | - |
+| `--uninstall` | Remove MailShift from system | - |
 
 ## Keyword Management
 
@@ -97,12 +123,14 @@ python main.py --list-keywords
 ## How It Works
 
 1. **Connect** – IMAP authentication to inbox
-2. **Fetch** – retrieve email headers (concurrent)
+2. **Fetch** – retrieve email headers (concurrent), body for Pro mode
 3. **Analyze**:
    - Fast: regex match against `blacklist.json` / `whitelist.json`
-   - Pro:  run matched mail through Ollama LLM
+   - Pro: two-phase analysis
+     - Phase 1: heuristic scan to find suspicious messages
+     - Phase 2: run matched mail through Ollama LLM for verification
 4. **Review** – table of messages marked for deletion
-5. **Delete** – move to Trash (empty Trash to permanent delete)
+5. **Delete** – permanent delete or move to Trash (empty Trash to permanent delete)
 
 ## Files
 
@@ -111,8 +139,14 @@ main.py           CLI entry point
 engine.py         IMAP engine + cache
 config.py         Config models + keyword patterns
 models.py         Data classes
+hardware.py       System info + worker calculation
 fast_analyzer.py  Heuristic analysis
 pro_analyzer.py   LLM analysis (Ollama)
+database.py       Cache storage (SQLite)
+history.py        Cleanup history + export
+logger.py         Logging utilities
+ui.py             Rich UI components
+cli_utils.py      CLI helper functions
 blacklist.json    Keywords → mark for deletion
 whitelist.json   Keywords → always keep
 ```
@@ -126,3 +160,9 @@ whitelist.json   Keywords → always keep
 ## Proton Bridge
 
 Run Proton Bridge locally, then connect with bridge credentials.
+
+## Requirements
+
+- Python 3.10+
+- IMAP access to your email provider
+- For Pro mode: [Ollama](https://ollama.com) running locally

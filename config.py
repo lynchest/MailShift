@@ -165,11 +165,34 @@ class OllamaConfig(BaseModel):
     """Settings for the local Ollama LLM endpoint."""
 
     base_url: str = "http://localhost:11434"
-    model: str = "qwen3.5:2b"
-    timeout: int = 30
+    model: str = "qwen3.5:2B"
+    timeout: int = 300
     max_body_chars: int = 500
 
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+
+    model_config = ConfigDict(frozen=True)
+
+
+class RateLimitConfig(BaseModel):
+    """Rate limiting and retry settings for IMAP operations."""
+
+    # Chunk sizing
+    fetch_chunk_size: int = 100   # UIDs per IMAP fetch request
+    delete_chunk_size: int = 100  # UIDs per IMAP store/copy request
+
+    # Rate limiting: delay between consecutive IMAP chunk requests (seconds)
+    chunk_delay: float = 0.1      # 100 ms between chunks by default
+
+    # Retry / back-off
+    max_retries: int = 3          # Number of retry attempts per chunk
+    retry_backoff: float = 2.0    # Exponential back-off multiplier (s, s*2, s*4 …)
+
+    # Connection timeout (seconds) – applied to the underlying socket
+    connect_timeout: int = 30
+
+    # Database batch-commit size: how many mails to INSERT at once
+    db_batch_size: int = 500
 
     model_config = ConfigDict(frozen=True)
 
@@ -181,8 +204,8 @@ class AppConfig(BaseModel):
     mode: Mode
     imap: IMAPConfig
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     dry_run: bool = True
-    max_workers: int = 8
     scan_limit: Optional[int] = None  # None → scan all messages
 
 

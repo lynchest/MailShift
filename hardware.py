@@ -1,31 +1,28 @@
 """
 hardware.py – System hardware detection for optimal performance.
 
-Detects CPU, RAM, and most importantly GPU/VRAM for Ollama model execution.
+Detects CPU, RAM, and GPU/VRAM (including Apple Silicon Unified Memory) 
+for Ollama model execution.
 """
 
 from __future__ import annotations
 
+import re
+import platform
 import subprocess
 from dataclasses import dataclass
 from typing import Optional
+
+try:
+    import psutil
+except ImportError:
+    raise ImportError("The 'psutil' library is required. Install it with: pip install psutil")
 
 try:
     import pynvml
     PYNVML_AVAILABLE = True
 except ImportError:
     PYNVML_AVAILABLE = False
-
-
-GPU_MEMORY_REQUIREMENTS: dict[int, int] = {
-    1: 2,
-    2: 3,
-    3: 5,
-    4: 6,
-    7: 8,
-    8: 10,
-    14: 16,
-}
 
 
 @dataclass
@@ -44,11 +41,17 @@ class SystemInfo:
 def get_system_info() -> SystemInfo:
     """
     Get comprehensive system hardware information including GPU/VRAM.
-    Falls back to CPU-only if no GPU detected or pynvml unavailable.
+    Supports NVIDIA (pynvml/nvidia-smi), Apple Metal (Unified Memory), and CPU fallback.
     """
     cpu_count, total_ram, available_ram = _get_cpu_ram()
-    gpu_info = _get_gpu_info()
     
+    # Check for Apple Silicon (Mac M1/M2/M3) Unified Memory
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        gpu_info = _get_apple_silicon_info(total_ram, available_ram)
+    else:
+        # Default to NVIDIA checks
+        gpu_info = _get_nvidia_gpu_info()
+
     return SystemInfo(
         cpu_count=cpu_count,
         total_ram_gb=total_ram,
@@ -63,9 +66,7 @@ def get_system_info() -> SystemInfo:
 
 def _get_cpu_ram() -> tuple[int, float, float]:
     """Get CPU count and RAM information."""
-    import psutil
-    
-    cpu_count = psutil.cpu_count(logical=True)
+    cpu_count = psutil.cpu_count(logical=True) or 1
     vm = psutil.virtual_memory()
     total_ram = vm.total / (1024 ** 3)
     available_ram = vm.available / (1024 ** 3)
@@ -73,7 +74,21 @@ def _get_cpu_ram() -> tuple[int, float, float]:
     return cpu_count, total_ram, available_ram
 
 
-def _get_gpu_info() -> dict:
+def _get_apple_silicon_info(total_ram: float, available_ram: float) -> dict:
+    """
+    Apple Silicon uses Unified Memory. The GPU shares system RAM.
+    macOS dynamically allocates it, but typically up to 70-80% can be used as VRAM.
+    """
+    return {
+        "has_gpu": True,
+        "name": "Apple Silicon (Metal)",
+        "total_vram_gb": round(total_ram, 1),
+        "available_vram_gb": round(available_ram, 1), # Unified memory means available RAM = available VRAM
+        "driver": "Metal API",
+    }
+
+
+def _get_nvidia_gpu_info() -> dict:
     """
     Detect GPU and VRAM using pynvml (NVIDIA) or nvidia-smi fallback.
     Returns dict with GPU information.
@@ -99,43 +114,27 @@ def _get_gpu_info() -> dict:
                     name = name.decode("utf-8")
                 
                 mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                total_vram = mem_info.total / (1024 ** 3)
-                available_vram = mem_info.free / (1024 ** 3)
                 
                 try:
                     driver = pynvml.nvmlSystemGetDriverVersion()
+                    if isinstance(driver, bytes):
+                        driver = driver.decode("utf-8")
                 except Exception:
                     driver = "Unknown"
                 
-                result["has_gpu"] = True
-                result["name"] = name
-                result["total_vram_gb"] = round(total_vram, 1)
-                result["available_vram_gb"] = round(available_vram, 1)
-                result["driver"] = driver
-                
+                result.update({
+                    "has_gpu": True,
+                    "name": name,
+                    "total_vram_gb": round(mem_info.total / (1024 ** 3), 1),
+                    "available_vram_gb": round(mem_info.free / (1024 ** 3), 1),
+                    "driver": driver
+                })
             pynvml.nvmlShutdown()
+            return result
         except Exception:
-            pass
-    
-    if not result["has_gpu"]:
-        result = _get_gpu_info_fallback()
-    
-    return result
+            pass # Fallback to nvidia-smi if NVML fails
 
-
-def _get_gpu_info_fallback() -> dict:
-    """
-    Fallback GPU detection using nvidia-smi subprocess.
-    Used if pynvml is not available or fails.
-    """
-    result = {
-        "has_gpu": False,
-        "name": "None",
-        "total_vram_gb": 0.0,
-        "available_vram_gb": 0.0,
-        "driver": "None",
-    }
-    
+    # Fallback to subprocess
     try:
         output = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name,memory.total,memory.free,driver_version", "--format=csv,noheader,nounits"],
@@ -145,39 +144,55 @@ def _get_gpu_info_fallback() -> dict:
         
         lines = output.decode("utf-8").strip().split("\n")
         if lines:
-            parts = lines[0].split(", ")
+            parts = [p.strip() for p in lines[0].split(",")]
             if len(parts) >= 4:
-                result["has_gpu"] = True
-                result["name"] = parts[0].strip()
-                result["total_vram_gb"] = round(int(parts[1].strip()) / 1024, 1)
-                result["available_vram_gb"] = round(int(parts[2].strip()) / 1024, 1)
-                result["driver"] = parts[3].strip()
-                
-    except Exception:
+                result.update({
+                    "has_gpu": True,
+                    "name": parts[0],
+                    "total_vram_gb": round(float(parts[1]) / 1024, 1),
+                    "available_vram_gb": round(float(parts[2]) / 1024, 1),
+                    "driver": parts[3]
+                })
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError, TimeoutError):
         pass
     
     return result
 
 
-def detect_model_size(model_name: str) -> int:
+def detect_model_size(model_name: str) -> float:
     """
     Extract model size in billions from model name.
-    Examples: 'qwen2.5:2b' -> 2, 'llama3:8b' -> 8, 'mistral:7b' -> 7
+    Examples: 'qwen2.5:2B' -> 2.0, 'qwen:1.5B' -> 1.5, 'llama3:8B' -> 8.0
     """
     model_lower = model_name.lower()
     
-    import re
-    patterns = [
-        r"(\d+)b",
-        r":(\d+)b",
-    ]
+    # Matches integers or floats followed by 'b' (e.g., "7b", "1.5b", ":8b")
+    match = re.search(r"(\d+(?:\.\d+)?)b", model_lower)
+    if match:
+        return float(match.group(1))
     
-    for pattern in patterns:
-        match = re.search(pattern, model_lower)
-        if match:
-            return int(match.group(1))
-    
-    return 3
+    return 3.0 # Default fallback size
+
+
+def get_vram_requirement(model_size_b: float) -> float:
+    """
+    KV-cache / context overhead per **additional concurrent** Ollama request.
+
+    Ollama loads the model once into VRAM (this is already reflected in
+    vram_available_gb being much smaller than vram_total_gb).  Each extra
+    concurrent request only needs VRAM for its own attention key-value cache.
+
+    For short email snippets (~500 chars ≈ 200 tokens) the KV-cache is tiny:
+      - ≤3B  models: ~0.15 GB/request
+      - 4-7B models: ~0.30 GB/request
+      - >7B  models: ~0.60 GB/request
+    """
+    if model_size_b <= 3:
+        return 0.15
+    elif model_size_b <= 7:
+        return 0.30
+    else:
+        return 0.60
 
 
 def calculate_optimal_workers(
@@ -186,61 +201,57 @@ def calculate_optimal_workers(
     system_info: Optional[SystemInfo] = None,
 ) -> int:
     """
-    Calculate optimal number of workers based on hardware and model.
-    
-    Priority:
-    1. VRAM (for PRO mode with GPU) - most important for LLM inference
-    2. CPU cores (for FAST mode or CPU-only inference)
-    
-    Args:
-        model_name: Ollama model name (e.g., 'qwen2.5:2b')
-        mode: 'pro' for LLM mode, 'fast' for heuristic mode
-        system_info: Optional pre-fetched system info
-    
-    Returns:
-        Optimal number of concurrent workers
+    Calculate optimal number of concurrent Ollama workers based on hardware.
+
+    GPU path:
+      Ollama keeps one copy of the model weights in VRAM; each additional
+      concurrent request only needs KV-cache overhead (see get_vram_requirement).
+      We therefore divide *free* VRAM by per-worker overhead, not by full
+      model size, so the result is much more generous for small models.
+
+      The CPU cap that previously limited GPU workers has been removed – the
+      network I/O + HTTP threads are cheap and the GPU is the real bottleneck.
+
+    CPU/RAM path:
+      Without a GPU the full model must fit in RAM per worker, so we keep a
+      stricter per-worker RAM estimate (1.5 × model_size_b GB).
     """
     if system_info is None:
         system_info = get_system_info()
-    
+
     mode = mode.lower()
-    
+    model_size = detect_model_size(model_name)
+
     if mode == "pro":
-        if system_info.has_gpu and system_info.vram_available_gb > 1:
-            model_size = detect_model_size(model_name)
-            vram_per_worker = GPU_MEMORY_REQUIREMENTS.get(model_size, 4)
-            
-            max_by_vram = max(1, int(system_info.vram_available_gb / vram_per_worker))
-            max_by_cpu = max(1, system_info.cpu_count - 1)
-            
-            optimal = min(max_by_vram, max_by_cpu, 16)
-            return max(1, optimal)
+        if system_info.has_gpu and system_info.vram_available_gb > 0.5:
+            # The model is already loaded in VRAM; vram_available_gb is just
+            # the leftover KV-cache space.  No extra headroom needed.
+            overhead_per_worker = get_vram_requirement(model_size)  # GB
+            max_by_vram = max(1, int(system_info.vram_available_gb / overhead_per_worker))
+
+            # For GPU + small models always allow at least 2 concurrent workers
+            gpu_minimum = 4 if model_size <= 3 else 2
+            result = max(gpu_minimum, max_by_vram)
+
+            # Hard ceiling heavily lowered to 4 for Ollama
+            # Ollama by default queues concurrent requests over its OLLAMA_NUM_PARALLEL limit.
+            # Allowing 9+ Python threaded HTTP connections creates severe HTTP timeouts simply waiting in queue.
+            # Local queuing in python (ThreadPoolExecutor) avoids timeouts!
+            return min(result, 4)
         else:
+            # CPU-only: full model weight must reside in RAM per worker
             available_ram = system_info.available_ram_gb
-            model_size = detect_model_size(model_name)
-            ram_per_worker = model_size * 2.5
-            
-            max_by_ram = max(1, int(available_ram / ram_per_worker))
-            max_by_cpu = max(1, system_info.cpu_count - 1)
-            
-            optimal = min(max_by_ram, max_by_cpu, 8)
-            return max(1, optimal)
+            ram_per_worker = model_size * 1.5          # more realistic than 2.5×
+            max_by_ram = int(available_ram / max(1.0, ram_per_worker))
+            max_by_cpu = max(1, system_info.cpu_count // 2)
+
+            return max(1, min(max_by_ram, max_by_cpu, 8))
     else:
-        return min(system_info.cpu_count, 16)
+        return max(1, min(system_info.cpu_count, 16))
 
 
 def format_system_info(system_info: SystemInfo, mode: str, model_name: str = "") -> str:
-    """
-    Format system info for display in the CLI.
-    
-    Args:
-        system_info: System hardware information
-        mode: 'pro' or 'fast'
-        model_name: Model name (for PRO mode)
-    
-    Returns:
-        Formatted string for display
-    """
+    """Format system info for display in the CLI using Rich tags."""
     if mode == "pro":
         if system_info.has_gpu:
             return (

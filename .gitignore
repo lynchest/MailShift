@@ -8,6 +8,8 @@ __pycache__/
 dist/
 build/
 .eggs/
+*.db
+*.log
 
 # Virtual environments
 .venv/
@@ -24,3 +26,6 @@ htmlcov/
 .vscode/
 *.swp
 *.swo
+
+# Logs
+logs/

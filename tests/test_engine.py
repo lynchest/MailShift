@@ -143,7 +143,7 @@ def test_fast_analyze_case_insensitive():
 def test_ollama_config_defaults():
     cfg = OllamaConfig()
     assert cfg.base_url == "http://localhost:11434"
-    assert cfg.model == "qwen3.5:2b"
+    assert cfg.model == "qwen3.5:2B"
     assert cfg.max_body_chars == 500
     assert "SIL" in cfg.system_prompt
     assert "TUT" in cfg.system_prompt
@@ -204,7 +204,7 @@ def test_list_uids_without_scan_limit_returns_all():
 
 
 def _make_ollama_cfg() -> OllamaConfig:
-    return OllamaConfig(base_url="http://localhost:11434", model="qwen3.5:2b")
+    return OllamaConfig(base_url="http://localhost:11434", model="qwen3.5:2B")
 
 
 def _mock_ollama_response(response_text: str):
@@ -537,7 +537,7 @@ def test_fast_analyze_case_insensitive():
 def test_ollama_config_defaults():
     cfg = OllamaConfig()
     assert cfg.base_url == "http://localhost:11434"
-    assert cfg.model == "qwen3.5:2b"
+    assert cfg.model == "qwen3.5:2B"
     assert cfg.max_body_chars == 500
     assert "SIL" in cfg.system_prompt
     assert "TUT" in cfg.system_prompt
