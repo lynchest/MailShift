@@ -1,0 +1,2 @@
+# mailskip
+Simple Mail Cleaner
