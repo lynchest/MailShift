@@ -204,19 +204,32 @@ def prompt_mode() -> tuple[Mode, str]:
         mt.add_column(style="bold yellow", width=4)
         mt.add_column(style="bold")
         mt.add_column(style="dim")
-        mt.add_row("[1]", "qwen3.5:2B", "[bold green](Recommended)[/bold green]")
-        for idx, model in enumerate(available_models, start=2):
+        
+        recommended_models = ["qwen3.5:2B", "qwen3.5:4B"]
+        
+        for rec_model in recommended_models:
+            is_available = any(rec_model.lower() == m.lower() for m in available_models)
+            status = "[bold green]Mevcut[/bold green]" if is_available else "[bold red]Mevcut Değil[/bold red]"
+            mt.add_row("[1]" if rec_model == "qwen3.5:2B" else "[2]", rec_model, status + " (Recommended)")
+        
+        non_rec_models = [m for m in available_models if not any(m.lower() == r.lower() for r in recommended_models)]
+        
+        for idx, model in enumerate(non_rec_models, start=len(recommended_models) + 1):
             mt.add_row(f"[{idx}]", model, "")
+        
         console.print(Panel(mt, title="[bold cyan]Ollama Model[/bold cyan]", border_style="cyan", box=box.ROUNDED))
 
-        choices = ["1"] + [str(i) for i in range(2, len(available_models) + 2)] if available_models else ["1"]
-        model_choice = Prompt.ask("[bold]Model[/bold]", choices=choices, default="1")
+        choices = ["1", "2"] + [str(i) for i in range(len(recommended_models) + 1, len(non_rec_models) + len(recommended_models) + 1)]
+        default_choice = "1"
+        model_choice = Prompt.ask("[bold]Model[/bold]", choices=choices, default=default_choice)
         
         if model_choice == "1":
             model = "qwen3.5:2B"
+        elif model_choice == "2":
+            model = "qwen3.5:4B"
         else:
-            idx = int(model_choice) - 2
-            model = available_models[idx]
+            idx = int(model_choice) - len(recommended_models) - 1
+            model = non_rec_models[idx]
         return mode, model
     
     return mode, "qwen3.5:2B"

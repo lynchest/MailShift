@@ -60,8 +60,9 @@ def check_ollama_health(base_url: str = "http://localhost:11434", model: str = "
         return True, "Ollama çalışıyor."
 
     available = [m["name"] for m in resp.json().get("models", [])]
-    # Ollama may list "model:tag" – accept partial matches
-    if any(model in m or m in model for m in available):
+    available_lower = [m.lower() for m in available]
+    model_lower = model.lower()
+    if any(model_lower in m or m in model_lower for m in available_lower):
         return True, f"Ollama çalışıyor, model '{model}' mevcut."
 
     return False, (
