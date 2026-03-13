@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 class Provider(str, Enum):
     GMAIL = "gmail"
     PROTON = "proton"
+    CUSTOM = "custom"
 
 
 class Mode(str, Enum):
@@ -43,6 +44,11 @@ PROVIDER_DEFAULTS: dict[Provider, dict] = {
         "port": 1143,
         "use_ssl": False,
     },
+    Provider.CUSTOM: {
+        "host": "",
+        "port": 993,
+        "use_ssl": True,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -57,6 +63,54 @@ def _load_keywords(filename: str) -> list[str]:
     path = Path(__file__).parent / filename
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _save_keywords(filename: str, keywords: list[str]) -> None:
+    path = Path(__file__).parent / filename
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(keywords, f, ensure_ascii=False, indent=2)
+
+
+def add_to_whitelist(word: str) -> bool:
+    keywords = _load_keywords("whitelist.json")
+    if word not in keywords:
+        keywords.append(word)
+        _save_keywords("whitelist.json", keywords)
+        return True
+    return False
+
+
+def remove_from_whitelist(word: str) -> bool:
+    keywords = _load_keywords("whitelist.json")
+    if word in keywords:
+        keywords.remove(word)
+        _save_keywords("whitelist.json", keywords)
+        return True
+    return False
+
+
+def add_to_blacklist(word: str) -> bool:
+    keywords = _load_keywords("blacklist.json")
+    if word not in keywords:
+        keywords.append(word)
+        _save_keywords("blacklist.json", keywords)
+        return True
+    return False
+
+
+def remove_from_blacklist(word: str) -> bool:
+    keywords = _load_keywords("blacklist.json")
+    if word in keywords:
+        keywords.remove(word)
+        _save_keywords("blacklist.json", keywords)
+        return True
+    return False
+
+
+def list_keywords() -> tuple[list[str], list[str]]:
+    whitelist = _load_keywords("whitelist.json")
+    blacklist = _load_keywords("blacklist.json")
+    return whitelist, blacklist
 
 
 JUNK_KEYWORDS: list[str] = _load_keywords("blacklist.json")
@@ -74,20 +128,48 @@ JUNK_PATTERN = re.compile('|'.join(_JUNK_ESCAPED), re.IGNORECASE) if _JUNK_ESCAP
 WHITELIST_PATTERN = re.compile('|'.join(_WHITELIST_ESCAPED), re.IGNORECASE) if _WHITELIST_ESCAPED else None
 
 
+DEFAULT_SYSTEM_PROMPT = """
+
+You are an email classifier. Classify each email as either SIL or TUT.
+
+SIL = Delete: newsletters, promotions, marketing, mass-sent announcements, subscription updates  
+TUT = Keep: personal messages, transactional (orders, shipping), meeting requests, anything requiring direct attention
+
+ALWAYS classify as TUT (never SIL), regardless of wording:
+- Account changes, password resets, security alerts
+- Data access or transfer requests
+- Login notifications, verification codes
+- Any email implying an action was taken on the recipient's account
+
+Rules:
+- Output ONLY the label: SIL or TUT
+- No explanation, no punctuation, nothing else
+- When uncertain, default to TUT
+
+Examples:
+"Get 50% off all items! Shop now." → SIL
+"Your order #12345 has shipped." → TUT
+"Weekly Newsletter – Top 10 recipes" → SIL
+"Hi John, can we meet tomorrow at 3pm?" → TUT
+"Action required: verify your account" → TUT
+"You are subscribed to Product Updates" → SIL
+"Meeting reminder: standup at 10 AM" → TUT
+"Your Apple ID information was updated." → TUT
+"A request was made to transfer your Google data." → TUT
+
+Email to classify:
+"""
+
+
 class OllamaConfig(BaseModel):
     """Settings for the local Ollama LLM endpoint."""
 
     base_url: str = "http://localhost:11434"
-    model: str = "qwen2.5:3b"
+    model: str = "qwen3.5:2b"
     timeout: int = 30
     max_body_chars: int = 500
 
-    # System prompt for the LLM
-    system_prompt: str = (
-        "You are a mail filter. Analyze if this email is a generic newsletter/spam "
-        "or a personal/important document. "
-        "Output ONLY 'SIL' (Delete) or 'TUT' (Keep). No explanation."
-    )
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
     model_config = ConfigDict(frozen=True)
 

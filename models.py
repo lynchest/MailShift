@@ -15,6 +15,7 @@ class MailMeta:
     date: str = ""
     size_bytes: int = 0
     body_preview: str = ""
+    has_attachment: bool = False
 
 
 @dataclass

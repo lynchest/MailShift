@@ -16,6 +16,9 @@ def fast_analyze(meta: MailMeta) -> ScanResult:
     Returns ScanResult with decision='SIL' if the message contains junk keywords
     and no whitelist keywords, 'TUT' otherwise.
     """
+    if meta.has_attachment:
+        return ScanResult(mail=meta, decision="TUT", reason="has_attachment")
+
     text = f"{meta.subject} {meta.sender} {meta.body_preview}"
 
     if WHITELIST_PATTERN:

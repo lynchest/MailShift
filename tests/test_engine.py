@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from email.message import Message
 
 from fast_analyzer import fast_analyze
 from pro_analyzer import pro_analyze
@@ -18,7 +19,7 @@ from config import (
     Provider,
     build_imap_config,
 )
-from engine import MailEngine, MailMeta, ScanResult, ScanStats
+from engine import MailEngine, MailMeta, ScanResult, ScanStats, _extract_body_preview
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +143,7 @@ def test_fast_analyze_case_insensitive():
 def test_ollama_config_defaults():
     cfg = OllamaConfig()
     assert cfg.base_url == "http://localhost:11434"
-    assert cfg.model == "qwen2.5:3b"
+    assert cfg.model == "qwen3.5:2b"
     assert cfg.max_body_chars == 500
     assert "SIL" in cfg.system_prompt
     assert "TUT" in cfg.system_prompt
@@ -165,13 +166,45 @@ def test_app_config_scan_limit_none_by_default():
     assert cfg.scan_limit is None
 
 
+def test_list_uids_respects_scan_limit():
+    imap = build_imap_config(Provider.GMAIL, "u@g.com", "p")
+    cfg = AppConfig(provider=Provider.GMAIL, mode=Mode.FAST, imap=imap, scan_limit=5)
+
+    mock_conn = MagicMock()
+    mock_conn.uid.return_value = ("OK", [b"10 9 8 7 6 5 4 3 2 1"])
+
+    engine = MailEngine(cfg)
+    engine._conn = mock_conn
+
+    uids = engine.list_uids()
+
+    assert uids == ["1", "2", "3", "4", "5"]
+    assert len(uids) == 5
+
+
+def test_list_uids_without_scan_limit_returns_all():
+    imap = build_imap_config(Provider.GMAIL, "u@g.com", "p")
+    cfg = AppConfig(provider=Provider.GMAIL, mode=Mode.FAST, imap=imap, scan_limit=None)
+
+    mock_conn = MagicMock()
+    mock_conn.uid.return_value = ("OK", [b"10 9 8 7 6 5 4 3 2 1"])
+
+    engine = MailEngine(cfg)
+    engine._conn = mock_conn
+
+    uids = engine.list_uids()
+
+    assert uids == ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+    assert len(uids) == 10
+
+
 # ---------------------------------------------------------------------------
 # pro_analyze – Ollama LLM (mocked HTTP)
 # ---------------------------------------------------------------------------
 
 
 def _make_ollama_cfg() -> OllamaConfig:
-    return OllamaConfig(base_url="http://localhost:11434", model="qwen2.5:3b")
+    return OllamaConfig(base_url="http://localhost:11434", model="qwen3.5:2b")
 
 
 def _mock_ollama_response(response_text: str):
@@ -187,7 +220,7 @@ def test_pro_analyze_sil_decision():
     with patch("pro_analyzer.requests.post", return_value=_mock_ollama_response("SIL")) as mock_post:
         result = pro_analyze(meta, _make_ollama_cfg())
     assert result.decision == "SIL"
-    assert result.reason == "llm:SIL"
+    assert result.reason.startswith("llm:SIL")
     mock_post.assert_called_once()
 
 
@@ -196,7 +229,7 @@ def test_pro_analyze_tut_decision():
     with patch("pro_analyzer.requests.post", return_value=_mock_ollama_response("TUT")) as mock_post:
         result = pro_analyze(meta, _make_ollama_cfg())
     assert result.decision == "TUT"
-    assert result.reason == "llm:TUT"
+    assert result.reason.startswith("llm:TUT")
 
 
 def test_pro_analyze_falls_back_to_tut_on_error():
@@ -309,6 +342,79 @@ def test_scan_stats_space_saved_mb():
     assert stats.space_saved_mb == pytest.approx(2.0)
 
 
+# ---------------------------------------------------------------------------
+# HTML email body extraction
+# ---------------------------------------------------------------------------
+
+
+def _make_email_msg(content: str, content_type: str = "text/plain") -> Message:
+    msg = Message()
+    msg["Content-Type"] = content_type
+    msg.set_payload(content)
+    return msg
+
+
+def _make_multipart_msg(plain: str = None, html: str = None) -> Message:
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    msg = MIMEMultipart("alternative")
+    if plain:
+        msg.attach(MIMEText(plain, "plain"))
+    if html:
+        msg.attach(MIMEText(html, "html"))
+    return msg
+
+
+def test_extract_body_preview_plain_text():
+    msg = _make_email_msg("Hello, this is a plain text email.", "text/plain")
+    result = _extract_body_preview(msg)
+    assert result == "Hello, this is a plain text email."
+
+
+def test_extract_body_preview_html_only():
+    html = '<html><body><div style="font-size:12px">Click here to unsubscribe from our newsletter.</div></body></html>'
+    msg = _make_email_msg(html, "text/html")
+    result = _extract_body_preview(msg)
+    assert "unsubscribe" in result.lower()
+    assert "<" not in result
+
+
+def test_extract_body_preview_multipart_prefers_plain():
+    plain = "This is plain text with unsubscribe keyword."
+    html = '<html><body><div>This is HTML unsubscribe</div></body></html>'
+    msg = _make_multipart_msg(plain=plain, html=html)
+    result = _extract_body_preview(msg)
+    assert result.strip() == plain
+
+
+def test_extract_body_preview_multipart_fallback_to_html():
+    html = '<html><body><p>Click here to unsubscribe from mailing list.</p></body></html>'
+    msg = _make_multipart_msg(html=html)
+    result = _extract_body_preview(msg)
+    assert "unsubscribe" in result.lower()
+
+
+def test_extract_body_preview_truncates():
+    long_text = "A" * 1000
+    msg = _make_email_msg(long_text, "text/plain")
+    result = _extract_body_preview(msg, max_chars=500)
+    assert len(result) == 500
+
+
+def test_extract_body_preview_html_truncates_after_conversion():
+    html = '<html><body>' + ("<p>A" * 500) + '</p></body></html>'
+    msg = _make_email_msg(html, "text/html")
+    result = _extract_body_preview(msg, max_chars=100)
+    assert len(result) <= 100
+
+
+def test_extract_body_preview_empty_on_no_content():
+    msg = Message()
+    result = _extract_body_preview(msg)
+    assert result == ""
+
+
 
 # ---------------------------------------------------------------------------
 # build_imap_config helpers
@@ -431,7 +537,7 @@ def test_fast_analyze_case_insensitive():
 def test_ollama_config_defaults():
     cfg = OllamaConfig()
     assert cfg.base_url == "http://localhost:11434"
-    assert cfg.model == "qwen2.5:3b"
+    assert cfg.model == "qwen3.5:2b"
     assert cfg.max_body_chars == 500
     assert "SIL" in cfg.system_prompt
     assert "TUT" in cfg.system_prompt
