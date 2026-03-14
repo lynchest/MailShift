@@ -85,7 +85,12 @@ def _extract_body_preview(msg: Message, max_chars: int = 500) -> str:
 # Retry helper
 # ---------------------------------------------------------------------------
 
-def _with_retry(fn: Callable, rl: RateLimitConfig, label: str = ""):
+def _with_retry(
+    fn: Callable,
+    rl: RateLimitConfig,
+    label: str = "",
+    on_error: Optional[Callable[[Exception, int], None]] = None,
+):
     """Call *fn()* up to *rl.max_retries* times with exponential back-off.
 
     Raises the last exception if all attempts fail.
@@ -97,6 +102,14 @@ def _with_retry(fn: Callable, rl: RateLimitConfig, label: str = ""):
             return fn()
         except Exception as exc:
             last_exc = exc
+            if on_error:
+                try:
+                    on_error(exc, attempt)
+                except Exception as hook_exc:
+                    log.warning(
+                        f"Retry hook failed for '{label}' on attempt {attempt}: "
+                        f"{hook_exc}"
+                    )
             if attempt < rl.max_retries:
                 log.warning(
                     f"Retry {attempt}/{rl.max_retries} for '{label}' "
@@ -198,6 +211,45 @@ class MailEngine:
             except Exception as e:
                 log.warning(f"Error disconnecting: {e}")
             self._conn = None
+
+    def _is_connection_error(self, exc: Exception) -> bool:
+        if isinstance(exc, (imaplib.IMAP4.abort, ssl.SSLError, socket.timeout, OSError)):
+            return True
+        msg = str(exc).lower()
+        return any(
+            token in msg
+            for token in (
+                "eof",
+                "socket",
+                "connection",
+                "broken pipe",
+                "timed out",
+                "connection reset",
+                "imap",
+            )
+        )
+
+    def _recover_connection(self, exc: Exception, label: str, attempt: int) -> None:
+        if not self._is_connection_error(exc):
+            return
+
+        log.warning(
+            f"Connection issue during '{label}' (attempt {attempt}); "
+            f"trying IMAP reconnect"
+        )
+
+        old_conn = self._conn
+        self._conn = None
+
+        if old_conn:
+            try:
+                old_conn.logout()
+            except Exception:
+                pass
+
+        self._conn = _connect(self.cfg.imap, timeout=self._rl.connect_timeout)
+        self._conn.select("INBOX")
+        log.info("IMAP reconnect successful; INBOX re-selected")
 
     def __enter__(self) -> MailEngine:
         self.connect()
@@ -479,7 +531,12 @@ class MailEngine:
 
             try:
                 _with_retry(
-                    _store, rl, label=f"delete chunk {chunk_idx}/{total_chunks}"
+                    _store,
+                    rl,
+                    label=f"delete chunk {chunk_idx}/{total_chunks}",
+                    on_error=lambda exc, attempt, lbl=(
+                        f"delete chunk {chunk_idx}/{total_chunks}"
+                    ): self._recover_connection(exc, lbl, attempt),
                 )
                 deleted.extend(chunk)
                 if progress_cb:
@@ -492,7 +549,19 @@ class MailEngine:
                 time.sleep(rl.chunk_delay)
 
         log.info("Expunging deleted messages")
-        self._conn.expunge()
+        try:
+            _with_retry(
+                lambda: self._conn.expunge(),  # type: ignore[union-attr]
+                rl,
+                label="delete expunge",
+                on_error=lambda exc, attempt: self._recover_connection(
+                    exc, "delete expunge", attempt
+                ),
+            )
+        except Exception as exc:
+            log.error(f"Delete expunge failed after retries: {exc}")
+            return []
+
         log.info(f"Deleted {len(deleted)} messages successfully")
         return deleted
 
@@ -556,7 +625,12 @@ class MailEngine:
 
             try:
                 _with_retry(
-                    _copy, rl, label=f"trash chunk {chunk_idx}/{total_chunks}"
+                    _copy,
+                    rl,
+                    label=f"trash chunk {chunk_idx}/{total_chunks}",
+                    on_error=lambda exc, attempt, lbl=(
+                        f"trash chunk {chunk_idx}/{total_chunks}"
+                    ): self._recover_connection(exc, lbl, attempt),
                 )
                 moved.extend(chunk)
                 if progress_cb:
@@ -568,7 +642,19 @@ class MailEngine:
             if chunk_idx < total_chunks and rl.chunk_delay > 0:
                 time.sleep(rl.chunk_delay)
 
-        self._conn.expunge()
+        try:
+            _with_retry(
+                lambda: self._conn.expunge(),  # type: ignore[union-attr]
+                rl,
+                label="trash expunge",
+                on_error=lambda exc, attempt: self._recover_connection(
+                    exc, "trash expunge", attempt
+                ),
+            )
+        except Exception as exc:
+            log.error(f"Trash expunge failed after retries: {exc}")
+            return []
+
         log.info(f"Moved {len(moved)} messages to trash successfully")
         return moved
 

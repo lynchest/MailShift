@@ -17,6 +17,8 @@ py -3.14 -m pytest tests/
 
 No other build or lint step is configured.
 
+- Gmail delete/move-to-trash behavior is covered by `tests/test_google_delete_trash.py`.
+
 ## Repo-specific conventions
 
 - **Python interpreter**: `py -3.14` — not `python`, not `python3`.
@@ -36,6 +38,7 @@ No other build or lint step is configured.
 - Pro mode is **two-phase**: heuristic runs first; LLM is called only for `"SIL"` candidates. Any change to fast analysis directly affects what the LLM sees.
 - Proton Mail requires Bridge running locally at `127.0.0.1:1143` (no SSL). Gmail is `imap.gmail.com:993` (SSL). These are set via `PROVIDER_DEFAULTS` in `config.py`.
 - `delete_mails()` and `move_to_trash()` both call `self._conn.expunge()` after flagging. Removing expunge silently leaves messages flagged but not deleted.
+- Delete/trash chunk operations and expunge are retry-protected; on socket/SSL EOF-style errors MailEngine reconnects and re-selects `INBOX` before the next retry.
 - `fetch_headers_concurrent` is sequential at the IMAP level (single connection, chunked). The name is misleading — do not add actual per-thread IMAP connections without careful locking.
 - `AppConfig`, `IMAPConfig`, and `OllamaConfig` are frozen Pydantic models. Do not attempt in-place mutation.
 - `hardware.py` detects NVIDIA first, then Intel/AMD GPUs on Windows via `Win32_VideoController` (PowerShell CIM query). Shared VRAM can be estimated from system RAM when `AdapterRAM` is not usable.

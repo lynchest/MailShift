@@ -18,6 +18,7 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 - **Dry-run default** – preview before any deletion
 - **Credential memory** – can save IMAP e-mail/app password locally and ask whether to reuse previous credentials on next run
 - **Delete options**: Permanent delete or move to Trash
+- **Resilient IMAP deletion**: Delete/trash chunks and expunge retry with exponential back-off and automatic IMAP reconnect on SSL/EOF disconnects
 - **Concurrent fetching** – multi-threaded IMAP operations
 - **Auto worker calculation** – automatically calculates optimal thread count based on hardware
     - Detects NVIDIA GPUs and Intel/AMD GPUs on Windows for Pro mode worker sizing
@@ -143,6 +144,7 @@ python main.py --list-keywords
      - Phase 2: run matched mail through Ollama LLM for verification
 4. **Review** – table of messages marked for deletion
 5. **Delete** – permanent delete or move to Trash (empty Trash to permanent delete)
+    - Delete/trash operations automatically retry transient IMAP/SSL socket failures and reconnect before retrying
 
 ## Files
 
@@ -181,3 +183,8 @@ Run Proton Bridge locally, then connect with bridge credentials.
     - Intel/AMD GPU acceleration still depends on Ollama backend support/driver stack; if Ollama cannot offload, inference can continue on CPU even when MailShift detects the GPU.
   - **Power User Tip**: Set the `OLLAMA_NUM_PARALLEL` environment variable to increase concurrent workers (default is 4).
   - **Note**: To close Ollama completely on Windows, you must use the Task Manager as it often runs without a visible window or system tray icon.
+
+## Tests
+
+- Run all tests with: `py -3.14 -m pytest tests/`
+- Gmail delete and move-to-trash flows are covered in `tests/test_google_delete_trash.py`.
