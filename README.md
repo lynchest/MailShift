@@ -16,6 +16,7 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
         - Pro mode disables model "thinking" output and uses a larger generation budget to prevent empty decision responses on 2B/4B models
 - **Body preview in Pro mode**: Fetches email body content for better LLM analysis
 - **Dry-run default** – preview before any deletion
+- **Credential memory** – can save IMAP e-mail/app password locally and ask whether to reuse previous credentials on next run
 - **Delete options**: Permanent delete or move to Trash
 - **Concurrent fetching** – multi-threaded IMAP operations
 - **Auto worker calculation** – automatically calculates optimal thread count based on hardware
@@ -103,6 +104,12 @@ python main.py --provider gmail --mode pro \
 | `--history` | Show cleanup history | - |
 | `--export` | Export results to CSV/JSON | - |
 | `--uninstall` | Remove MailShift from system | - |
+
+## Credential Reuse
+
+- In interactive credential flow, MailShift can store credentials in local `credentials.json` (project root, provider-based).
+- On later runs, if saved credentials exist, it asks whether to reuse previous values.
+- You can still override credentials anytime via `--username` and `--password` flags.
 
 ## Keyword Management
 

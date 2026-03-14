@@ -11,6 +11,7 @@ build/
 *.db
 *.log
 *.txt
+credentials.json
 
 # Virtual environments
 .venv/

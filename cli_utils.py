@@ -34,6 +34,51 @@ from ui import console, clear_console
 
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+_CREDENTIALS_FILE = Path(__file__).resolve().parent / "credentials.json"
+
+
+def _load_saved_credentials() -> dict[str, dict[str, str]]:
+    """Load provider-based saved credentials from disk."""
+    if not _CREDENTIALS_FILE.exists():
+        return {}
+
+    try:
+        with open(_CREDENTIALS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        # Corrupt/unreadable file should not block login flow.
+        pass
+    return {}
+
+
+def _get_saved_credentials(provider: Provider) -> tuple[str, str] | None:
+    saved = _load_saved_credentials()
+    provider_data = saved.get(provider.value)
+    if not isinstance(provider_data, dict):
+        return None
+
+    username = provider_data.get("username")
+    password = provider_data.get("password")
+    if isinstance(username, str) and isinstance(password, str) and username and password:
+        return username, password
+    return None
+
+
+def _save_credentials(provider: Provider, username: str, password: str) -> bool:
+    """Persist credentials so user can reuse them in future runs."""
+    try:
+        data = _load_saved_credentials()
+        data[provider.value] = {
+            "username": username,
+            "password": password,
+        }
+        with open(_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
 
 
 def _is_valid_email(value: str) -> bool:
@@ -358,9 +403,24 @@ def prompt_mode() -> tuple[Mode, str]:
     return mode, "qwen3.5:2B"
 
 
-def prompt_credentials(provider: Provider) -> tuple[str, str]:
+def prompt_credentials(
+    provider: Provider,
+    preset_username: Optional[str] = None,
+    preset_password: Optional[str] = None,
+) -> tuple[str, str]:
+    if not preset_username or not preset_password:
+        saved_creds = _get_saved_credentials(provider)
+        if saved_creds:
+            saved_username, saved_password = saved_creds
+            if Confirm.ask(
+                f"[bold]Kayıtlı bilgiler bulundu ({saved_username}). Önceki bilgileri kullanılsın mı?[/bold]",
+                default=True,
+            ):
+                clear_console()
+                return saved_username, saved_password
+
     if provider == Provider.GMAIL:
-        username = _prompt_email("Gmail adresi")
+        username = preset_username.strip() if preset_username else _prompt_email("Gmail adresi")
 
         pt = Table(box=None, show_header=False, padding=(0, 2))
         pt.add_column(style="bold yellow", width=4)
@@ -384,11 +444,18 @@ def prompt_credentials(provider: Provider) -> tuple[str, str]:
             clear_console()
 
     elif provider == Provider.PROTON:
-        username = _prompt_email("Proton Bridge e-posta adresi")
+        username = preset_username.strip() if preset_username else _prompt_email("Proton Bridge e-posta adresi")
     else:
-        username = Prompt.ask(f"\n[bold cyan]IMAP Kullanıcı Adı[/bold cyan]").strip()
+        username = preset_username.strip() if preset_username else Prompt.ask(f"\n[bold cyan]IMAP Kullanıcı Adı[/bold cyan]").strip()
 
-    password = getpass.getpass("Şifre (App Password / Bridge şifresi): ")
+    password = preset_password if preset_password else getpass.getpass("Şifre (App Password / Bridge şifresi): ")
+
+    if Confirm.ask("[bold]Bu bilgileri sonraki çalıştırmalar için kaydedeyim mi?[/bold]", default=True):
+        if _save_credentials(provider, username, password):
+            console.print("[green]Kimlik bilgileri kaydedildi.[/green]")
+        else:
+            console.print("[yellow]Kimlik bilgileri kaydedilemedi.[/yellow]")
+
     clear_console()
     return username, password
 

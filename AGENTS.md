@@ -29,6 +29,7 @@ No other build or lint step is configured.
 
 - `mailshift.db` — SQLite cache, created at **CWD** (not a fixed path). Contains `mails_cache` (header/body cache) and `fetch_checkpoint` (resume table). Persists across runs. Delete it or call `clear_mails_cache()` to force a fresh scan.
 - `whitelist.json` / `blacklist.json` — project root, not in a subdirectory.
+- `credentials.json` — project root, stores provider-based credential cache used by interactive "reuse previous credentials" prompt.
 
 ## Change safety rules
 

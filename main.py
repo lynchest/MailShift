@@ -148,7 +148,11 @@ def main(
 
     # ---- credentials ----
     if not username or not password:
-        username, password = prompt_credentials(resolved_provider)
+        username, password = prompt_credentials(
+            resolved_provider,
+            preset_username=username,
+            preset_password=password,
+        )
 
     # ---- custom IMAP settings ----
     custom_host = host
