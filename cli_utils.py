@@ -1,6 +1,5 @@
 import getpass
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -31,7 +30,6 @@ from config import (
     remove_from_blacklist,
     remove_from_whitelist,
 )
-from hardware import get_system_info
 from ui import console, clear_console
 
 
@@ -107,7 +105,7 @@ def prompt_provider() -> Provider:
     t.add_column(style="bold", width=8)
     t.add_column(style="dim")
     t.add_row("[1]", "Gmail", "IMAP over SSL – App Password required")
-    t.add_row("[2]", "Proton", "via Proton Bridge at 127.0.0.1")
+    t.add_row("[2]", "Proton", "via Proton Bridge at 127.0.0.1 (Required paid account)")
     t.add_row("[3]", "Custom", "your own IMAP server")
     console.print(Panel(t, title="[bold cyan]Mail Provider[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     choice = Prompt.ask("[bold]Provider[/bold]", choices=["1", "2", "3"], default="1")
@@ -208,20 +206,8 @@ def install_ollama() -> bool:
         return False
 
 
-def _build_ollama_env() -> dict[str, str]:
-    """Build an environment dict for launching Ollama with Intel GPU support when applicable."""
-    ollama_env = os.environ.copy()
-    try:
-        system_info = get_system_info()
-        if "intel" in (system_info.gpu_name or "").lower():
-            ollama_env["OLLAMA_INTEL_GPU"] = "1"
-    except Exception:
-        pass
-    return ollama_env
-
-
-def _launch_ollama_process(ollama_env: dict[str, str]) -> bool:
-    """Start an `ollama serve` subprocess with the given environment. Returns True on success."""
+def _launch_ollama_process() -> bool:
+    """Start an `ollama serve` subprocess. Returns True on success."""
     if sys.platform == "win32":
         try:
             creation_flags = 0x08000000  # CREATE_NO_WINDOW
@@ -230,7 +216,6 @@ def _launch_ollama_process(ollama_env: dict[str, str]) -> bool:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                env=ollama_env,
                 creationflags=creation_flags,
                 close_fds=True,
             )
@@ -243,7 +228,6 @@ def _launch_ollama_process(ollama_env: dict[str, str]) -> bool:
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                env=ollama_env,
                 start_new_session=True,
             )
             return True
@@ -303,53 +287,6 @@ def _is_ollama_running() -> bool:
         return False
 
 
-def ensure_ollama_intel_gpu() -> bool:
-    """If Intel GPU is detected and Ollama is already running without OLLAMA_INTEL_GPU,
-    restart Ollama with the correct environment. Returns True if a restart was performed."""
-    try:
-        system_info = get_system_info()
-    except Exception:
-        return False
-
-    if "intel" not in (system_info.gpu_name or "").lower():
-        return False  # Not an Intel GPU, nothing to do
-
-    # If OLLAMA_INTEL_GPU is already in the current process environment,
-    # and Ollama is running, assume it was started correctly before.
-    if os.environ.get("OLLAMA_INTEL_GPU") == "1":
-        return False
-
-    if not _is_ollama_running():
-        return False  # Ollama not running; start_ollama will handle it
-
-    # Intel GPU detected, Ollama is running but likely without OLLAMA_INTEL_GPU=1.
-    console.print(
-        "[bold yellow]⚠ Intel GPU algılandı ama Ollama GPU desteği olmadan çalışıyor.[/bold yellow]\n"
-        "[cyan]Ollama, OLLAMA_INTEL_GPU=1 ile yeniden başlatılıyor...[/cyan]"
-    )
-
-    stop_ollama()
-
-    ollama_env = _build_ollama_env()
-    if not _launch_ollama_process(ollama_env):
-        console.print("[red]Ollama yeniden başlatılamadı.[/red]")
-        return False
-
-    # Wait for Ollama to come back up
-    for _ in range(5):
-        time.sleep(2)
-        if _is_ollama_running():
-            # Mark in current process env so we don't restart again
-            os.environ["OLLAMA_INTEL_GPU"] = "1"
-            console.print(
-                "[bold green]✓ Ollama Intel GPU desteğiyle yeniden başlatıldı![/bold green]"
-            )
-            return True
-
-    console.print("[red]Ollama yeniden başlatıldı ancak henüz yanıt vermiyor.[/red]")
-    return False
-
-
 def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
     """
     Try to start Ollama in the background.
@@ -360,17 +297,12 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
     if not check_ollama_installed():
         return False
 
-    ollama_env = _build_ollama_env()
-
-    if not _launch_ollama_process(ollama_env):
+    if not _launch_ollama_process():
         return False
 
     for attempt in range(max_retries):
         time.sleep(retry_delay)
         if get_ollama_models():
-            # Mark in current process env for Intel GPU tracking
-            if ollama_env.get("OLLAMA_INTEL_GPU") == "1":
-                os.environ["OLLAMA_INTEL_GPU"] = "1"
             console.print("[green]Ollama başarıyla başlatıldı! (tamamen kapatmanız için görev yöneticisine bakmalısınız)[/green]")
             return True
 
@@ -470,18 +402,85 @@ def ensure_ollama_model(
     return False
 
 
-def prompt_mode() -> tuple[Mode, str]:
+def get_lm_studio_models(base_url: str = "http://localhost:1234", timeout: int = 5) -> list[str]:
+    """Get available models from LM Studio API."""
+    try:
+        import requests
+        resp = requests.get(f"{base_url}/v1/models", timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        return [m["id"] for m in data.get("data", [])]
+    except Exception:
+        return []
+
+
+def prompt_llm_backend() -> str:
+    """Ask user which LLM backend to use for Pro mode. Returns 'ollama' or 'lm_studio'."""
+    t = Table(box=None, show_header=False, padding=(0, 2))
+    t.add_column(style="bold yellow", width=4)
+    t.add_column(style="bold", width=12)
+    t.add_column(style="dim")
+    t.add_row("[1]", "Ollama", "[bold green]Recommended for NVIDIA GPU (Easy Setup)[/bold green]")
+    t.add_row("[2]", "LM Studio", "[bold cyan]Recommended for All Users [/bold cyan]")
+    console.print(Panel(t, title="[bold cyan]LLM Provider[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    choice = Prompt.ask("[bold]Provider[/bold]", choices=["1", "2"], default="1")
+    clear_console()
+    return "ollama" if choice == "1" else "lm_studio"
+
+
+def _prompt_lm_studio_flow() -> tuple[Mode, str, str]:
+    """Handle LM Studio model selection for Pro mode."""
+    available_models = get_lm_studio_models()
+
+    if not available_models:
+        console.print(Panel(
+            "[bold yellow]LM Studio'ya bağlanılamadı veya hiç model yüklü değil![/bold yellow]\n\n"
+            "LM Studio'yu başlatın ve bir model başlatın:\n"
+            "[bold]1)[/bold] LM Studio'yu açın\n"
+            "[bold]2)[/bold] Sol menüden bir model indirin\n"
+            "[bold]3)[/bold] 'Local Server' sekmesinden 'Start Server' butonuna tıklayın\n"
+            "[bold]4)[/bold] Enter'a basarak tekrar deneyin",
+            title="[bold red]LM Studio Gerekli[/bold red]",
+            border_style="red",
+            box=box.ROUNDED,
+        ))
+        Prompt.ask("[dim]LM Studio başlatıldıktan sonra Enter'a basın[/dim]")
+        available_models = get_lm_studio_models()
+
+        if not available_models:
+            console.print("[red]Hâlâ model alınamıyor. Fast moduna geçiliyor.[/red]")
+            return Mode.FAST, "qwen3.5:2B", "ollama"
+
+    mt = Table(box=None, show_header=False, padding=(0, 2))
+    mt.add_column(style="bold yellow", width=4)
+    mt.add_column(style="bold")
+    for idx, model in enumerate(available_models, start=1):
+        mt.add_row(f"[{idx}]", model)
+    console.print(Panel(mt, title="[bold cyan]LM Studio Model[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+
+    choices = [str(i) for i in range(1, len(available_models) + 1)]
+    model_choice = Prompt.ask("[bold]Model[/bold]", choices=choices, default="1")
+    selected_model = available_models[int(model_choice) - 1]
+    return Mode.PRO, selected_model, "lm_studio"
+
+
+def prompt_mode() -> tuple[Mode, str, str]:
+    """Returns (mode, model_name, llm_backend)."""
     t = Table(box=None, show_header=False, padding=(0, 2))
     t.add_column(style="bold yellow", width=4)
     t.add_column(style="bold", width=6)
     t.add_column(style="dim")
     t.add_row("[1]", "Fast", "Heuristic keyword matching – instant, no AI [yellow](Less accurate)[/yellow]")
-    t.add_row("[2]", "Pro", "Heuristic + local Ollama LLM – more accurate [bold green](Recommended)[/bold green]")
+    t.add_row("[2]", "Pro", "Heuristic + local LLM (Ollama / LM Studio) – more accurate [bold green](Recommended)[/bold green]")
     console.print(Panel(t, title="[bold cyan]Scan Mode[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     choice = Prompt.ask("[bold]Mode[/bold]", choices=["1", "2"], default="1")
     mode = Mode.FAST if choice == "1" else Mode.PRO
     
     if mode == Mode.PRO:
+        llm_backend = prompt_llm_backend()
+        if llm_backend == "lm_studio":
+            return _prompt_lm_studio_flow()
+
         console.print("\n[bold cyan]Select Ollama model:[/bold cyan]")
 
         available_models = get_ollama_models()
@@ -516,21 +515,21 @@ def prompt_mode() -> tuple[Mode, str]:
                                     pass
                                 else:
                                     show_ollama_next_steps("Ollama çalışıyor ancak henüz model bulunamadı.")
-                                    return Mode.FAST, "qwen3.5:2B"
+                                    return Mode.FAST, "qwen3.5:2B", llm_backend
                             else:
                                 show_ollama_next_steps("Ollama kuruldu ancak otomatik başlatılamadı.")
-                                return Mode.FAST, "qwen3.5:2B"
+                                return Mode.FAST, "qwen3.5:2B", llm_backend
                         else:
                             show_ollama_next_steps("Kurulum tamamlanamadı. Manuel kurulum gerekebilir.")
-                            return Mode.FAST, "qwen3.5:2B"
+                            return Mode.FAST, "qwen3.5:2B", llm_backend
                     else:
                         show_ollama_next_steps("Otomatik kurulum atlandı.")
                         console.print("[cyan]Fast moduna geçiliyor...[/cyan]")
-                        return Mode.FAST, "qwen3.5:2B"
+                        return Mode.FAST, "qwen3.5:2B", llm_backend
                 else:
                     show_ollama_next_steps("Bu sistemde otomatik kurulum yok. Manuel kurulum gerekli.")
                     console.print("[cyan]Fast moduna geçiliyor...[/cyan]")
-                    return Mode.FAST, "qwen3.5:2B"
+                    return Mode.FAST, "qwen3.5:2B", llm_backend
 
             console.print("[yellow]Ollama çalışmıyor veya model bulunamadı.[/yellow]")
 
@@ -553,7 +552,7 @@ def prompt_mode() -> tuple[Mode, str]:
 
                 if not available_models:
                     console.print("[red]Hâlâ model alınamıyor. Fast moduna geçiliyor.[/red]")
-                    return Mode.FAST, "qwen3.5:2B"
+                    return Mode.FAST, "qwen3.5:2B", llm_backend
 
         mt = Table(box=None, show_header=False, padding=(0, 2))
         mt.add_column(style="bold yellow", width=4)
@@ -602,11 +601,11 @@ def prompt_mode() -> tuple[Mode, str]:
         if model in recommended_names and not any(model.lower() == m.lower() for m in available_models):
             if not ensure_ollama_model(model, available_models=available_models):
                 console.print("[yellow]Model hazır olmadığı için Fast moduna geçiliyor.[/yellow]")
-                return Mode.FAST, "qwen3.5:2B"
-            
-        return mode, model
-    
-    return mode, "qwen3.5:2B"
+                return Mode.FAST, "qwen3.5:2B", llm_backend
+
+        return mode, model, llm_backend
+
+    return mode, "qwen3.5:2B", "ollama"
 
 
 def prompt_credentials(

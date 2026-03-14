@@ -177,6 +177,19 @@ class OllamaConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+class LMStudioConfig(BaseModel):
+    """Settings for the LM Studio OpenAI-compatible endpoint."""
+
+    base_url: str = "http://localhost:1234"
+    model: str = ""
+    timeout: int = 300
+    max_body_chars: int = 500
+
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
+
+    model_config = ConfigDict(frozen=True)
+
+
 class RateLimitConfig(BaseModel):
     """Rate limiting and retry settings for IMAP operations."""
 
@@ -207,6 +220,8 @@ class AppConfig(BaseModel):
     mode: Mode
     imap: IMAPConfig
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    lm_studio: LMStudioConfig = Field(default_factory=LMStudioConfig)
+    llm_backend: str = "ollama"  # "ollama" or "lm_studio"
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     dry_run: bool = True
     scan_limit: Optional[int] = None  # None → scan all messages

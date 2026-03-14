@@ -1,20 +1,20 @@
 """
-pro_analyzer.py – Ollama LLM-based email analysis.
+pro_analyzer.py – LLM-based email analysis.
 
-Uses a persistent ``requests.Session`` for TCP connection reuse across
-concurrent workers and caches the ``OllamaProvider`` instance per config
-so it is not re-created for every single email.
+Supports two backends:
+  - Ollama  (recommended for NVIDIA GPU users)
+  - LM Studio (recommended for AMD / Intel GPU users, OpenAI-compatible API)
 """
 
 import re
 import json
 import os
 import unicodedata
-from typing import Optional
+from typing import Optional, Union
 
 import requests
 
-from config import OllamaConfig
+from config import OllamaConfig, LMStudioConfig
 from hardware import detect_model_size, get_system_info
 from models import MailMeta, ScanResult
 from abc import ABC, abstractmethod
@@ -31,10 +31,6 @@ def _parse_bool_env(value: str) -> Optional[bool]:
     if lowered in {"0", "false", "no", "off"}:
         return False
     return None
-
-
-def _is_intel_gpu(gpu_name: str) -> bool:
-    return "intel" in (gpu_name or "").lower()
 
 
 def _select_ollama_runtime_options(model_name: str) -> dict[str, int | float | bool]:
@@ -69,12 +65,6 @@ def _select_ollama_runtime_options(model_name: str) -> dict[str, int | float | b
 
             gpu_name = (system_info.gpu_name or "").lower()
             options["use_flash_attn"] = any(token in gpu_name for token in ("nvidia", "rtx", "gtx", "apple"))
-
-            if _is_intel_gpu(gpu_name):
-                # Intel iGPU shared-memory reporting is often conservative. Ask Ollama
-                # to offload as many layers as possible so it does not stay CPU-only.
-                options["num_gpu"] = max(int(options["num_gpu"]), 99)
-
             options["num_thread"] = max(2, min(int(options["num_thread"]), 8))
         else:
             options["num_gpu"] = 0
@@ -116,7 +106,7 @@ def _get_session() -> requests.Session:
 
 
 def close_ollama_session():
-    """Close the persistent Ollama HTTP session if it exists."""
+    """Close the persistent HTTP session if it exists."""
     global _session
     if _session is not None:
         _session.close()
@@ -147,6 +137,36 @@ def check_ollama_health(base_url: str = "http://localhost:11434", model: str = "
         f"Ollama çalışıyor fakat '{model}' modeli bulunamadı.\n"
         f"Mevcut modeller: {', '.join(available) or '(yok)'}\n"
         f"Modeli çekmek için: ollama pull {model}"
+    )
+
+
+# ── LM Studio health check ───────────────────────────────────────────────
+
+def check_lm_studio_health(base_url: str = "http://localhost:1234", model: str = "") -> tuple[bool, str]:
+    try:
+        resp = _get_session().get(f"{base_url}/v1/models", timeout=5)
+        resp.raise_for_status()
+    except requests.ConnectionError:
+        return False, (
+            "LM Studio'ya bağlanılamıyor. "
+            "LM Studio'nun çalıştığından ve Local Server'ın açık olduğundan emin olun."
+        )
+    except Exception as exc:
+        return False, f"LM Studio bağlantı hatası: {exc}"
+
+    available = [m["id"] for m in resp.json().get("data", [])]
+    if not model:
+        if available:
+            return True, f"LM Studio çalışıyor, {len(available)} model yüklü."
+        return False, "LM Studio çalışıyor fakat herhangi bir model yüklü değil. LM Studio'da bir model başlatın."
+
+    if any(model.lower() in m.lower() or m.lower() in model.lower() for m in available):
+        return True, f"LM Studio çalışıyor, model '{model}' mevcut."
+
+    return False, (
+        f"LM Studio çalışıyor fakat '{model}' modeli yüklü değil.\n"
+        f"Mevcut modeller: {', '.join(available) or '(yok)'}\n"
+        "LM Studio'da bir model başlatın."
     )
 
 
@@ -229,7 +249,6 @@ class LLMProvider(ABC):
 
     def _extract_reason(self, response: str, decision: str) -> str:
         response_lower = response.lower()
-        # Added Turkish keywords as well
         patterns = [
             r'çünkü\s+(.+?)(?:\.|$)',
             r'nedeni[:\s]\s*(.+?)(?:\.|$)',
@@ -244,7 +263,7 @@ class LLMProvider(ABC):
             match = re.search(pattern, response_lower)
             if match:
                 reason = match.group(1).strip()
-                if 3 < len(reason) < 150: # Slightly increased max reason length
+                if 3 < len(reason) < 150:
                     return reason
         if decision == "SIL":
             return "newsletter/spam"
@@ -307,19 +326,76 @@ class OllamaProvider(LLMProvider):
 
             decision, reason = self._parse_llm_response(raw_response)
             return ScanResult(mail=meta, decision=decision, reason=f"llm:{decision} - {reason}")
-            
+
         except Exception as exc:
             log.warning(f"Ollama API error: {exc}")
             return ScanResult(mail=meta, decision="TUT", reason=f"llm-error:{exc}")
 
 
+class LMStudioProvider(LLMProvider):
+    """LM Studio OpenAI-compatible API implementation."""
+
+    def __init__(self, cfg: LMStudioConfig):
+        self.cfg = cfg
+
+    @staticmethod
+    def _build_user_prompt(meta: MailMeta, max_body_chars: int) -> str:
+        body = (meta.body_preview or "")[:max_body_chars]
+        return (
+            "Aşağıdaki e-postayı sınıflandır. Sadece karar ver.\n\n"
+            f"Konu: {meta.subject}\n"
+            f"Gönderen: {meta.sender}\n"
+            f"İçerik: {body}"
+        )
+
+    def analyze(self, meta: MailMeta) -> ScanResult:
+        user_prompt = self._build_user_prompt(meta, self.cfg.max_body_chars)
+        payload = {
+            "model": self.cfg.model,
+            "messages": [
+                {"role": "system", "content": self.cfg.system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+            "temperature": 0.0,
+            "max_tokens": 256,
+        }
+        try:
+            resp = _get_session().post(
+                f"{self.cfg.base_url}/v1/chat/completions",
+                json=payload,
+                timeout=self.cfg.timeout,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            raw_response = ""
+            choices = body.get("choices", [])
+            if choices and isinstance(choices[0], dict):
+                message = choices[0].get("message", {})
+                raw_response = str(message.get("content", "")).strip()
+
+            decision, reason = self._parse_llm_response(raw_response)
+            return ScanResult(mail=meta, decision=decision, reason=f"llm:{decision} - {reason}")
+
+        except Exception as exc:
+            log.warning(f"LM Studio API error: {exc}")
+            return ScanResult(mail=meta, decision="TUT", reason=f"llm-error:{exc}")
+
+
 # ── Cached provider instance & Main Entry ────────────────────────────────
-_provider_cache: dict[str, OllamaProvider] = {}
+_provider_cache: dict[str, LLMProvider] = {}
 
 
-def pro_analyze(meta: MailMeta, ollama_cfg: OllamaConfig) -> ScanResult:
-    """Analyze a single email via cached Ollama provider."""
-    cache_key = f"{ollama_cfg.base_url}|{ollama_cfg.model}"
+def pro_analyze(
+    meta: MailMeta,
+    cfg: Union[OllamaConfig, LMStudioConfig],
+    backend: str = "ollama",
+) -> ScanResult:
+    """Analyze a single email via cached LLM provider."""
+    cache_key = f"{backend}|{cfg.base_url}|{cfg.model}"
     if cache_key not in _provider_cache:
-        _provider_cache[cache_key] = OllamaProvider(ollama_cfg)
+        if backend == "lm_studio":
+            _provider_cache[cache_key] = LMStudioProvider(cfg)  # type: ignore[arg-type]
+        else:
+            _provider_cache[cache_key] = OllamaProvider(cfg)  # type: ignore[arg-type]
     return _provider_cache[cache_key].analyze(meta)

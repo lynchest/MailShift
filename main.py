@@ -48,6 +48,7 @@ from rich.prompt import Confirm, Prompt
 from config import (
     AppConfig,
     DEFAULT_SYSTEM_PROMPT,
+    LMStudioConfig,
     Mode,
     OllamaConfig,
     Provider,
@@ -70,7 +71,7 @@ from engine import (
     ScanStats,
 )
 from database import save_mails_cache, load_mails_cache
-from pro_analyzer import check_ollama_health, close_ollama_session
+from pro_analyzer import check_ollama_health, check_lm_studio_health, close_ollama_session
 
 from ui import (
     console,
@@ -82,7 +83,6 @@ from ui import (
 from history import save_cleanup_log, export_scan_results, print_history
 from logger import log
 from cli_utils import (
-    ensure_ollama_intel_gpu,
     handle_keywords,
     handle_uninstall,
     prompt_credentials,
@@ -167,7 +167,10 @@ def main(
 
     # ---- resolve provider / mode (interactive if not provided) ----
     resolved_provider = Provider(provider) if provider else prompt_provider()
-    resolved_mode, selected_model = (Mode(mode), ollama_model) if mode else prompt_mode()
+    if mode:
+        resolved_mode, selected_model, llm_backend = Mode(mode), ollama_model, "ollama"
+    else:
+        resolved_mode, selected_model, llm_backend = prompt_mode()
 
     # ---- credentials ----
     if not username or not password:
@@ -197,23 +200,28 @@ def main(
         model=selected_ollama_model,
         system_prompt=ollama_prompt if ollama_prompt else DEFAULT_SYSTEM_PROMPT,
     )
-    
+    lm_studio_cfg = LMStudioConfig(
+        model=selected_ollama_model if llm_backend == "lm_studio" else "",
+        system_prompt=ollama_prompt if ollama_prompt else DEFAULT_SYSTEM_PROMPT,
+    )
+
     resolved_workers = calculate_optimal_workers(selected_ollama_model, resolved_mode.value)
 
     cfg = AppConfig(
         provider=resolved_provider, mode=resolved_mode, imap=imap_cfg,
-        ollama=ollama_cfg, dry_run=dry_run,
-        scan_limit=scan_limit,
+        ollama=ollama_cfg, lm_studio=lm_studio_cfg, llm_backend=llm_backend,
+        dry_run=dry_run, scan_limit=scan_limit,
     )
 
     clear_console()
 
     # ---- summary of what we're about to do ----
     sys_info = get_system_info()
-    model_display = (
-        f"{resolved_mode.value.capitalize()} ({selected_ollama_model})"
-        if resolved_mode == Mode.PRO else "Fast (heuristic)"
-    )
+    if resolved_mode == Mode.PRO:
+        backend_label = "LM Studio" if llm_backend == "lm_studio" else "Ollama"
+        model_display = f"Pro ({backend_label}: {selected_ollama_model})"
+    else:
+        model_display = "Fast (heuristic)"
     hardware_info = format_system_info(sys_info, resolved_mode.value, selected_ollama_model)
     
     console.print(
@@ -230,26 +238,41 @@ def main(
         )
     )
 
-    # ---- Ollama health check (Pro mode only) ----
+    # ---- LLM health check (Pro mode only) ----
     if resolved_mode == Mode.PRO:
-        # If Intel GPU is detected and Ollama is running without GPU support,
-        # restart Ollama with OLLAMA_INTEL_GPU=1 before the health check.
-        ensure_ollama_intel_gpu()
-
-        with console.status("[cyan]Ollama bağlantısı kontrol ediliyor…[/cyan]", spinner="dots"):
-            ok, msg = check_ollama_health(ollama_cfg.base_url, selected_ollama_model)
-        if ok:
-            console.print(f"[green]✓ {msg}[/green]")
+        if llm_backend == "lm_studio":
+            with console.status("[cyan]LM Studio bağlantısı kontrol ediliyor…[/cyan]", spinner="dots"):
+                ok, msg = check_lm_studio_health(lm_studio_cfg.base_url, selected_ollama_model)
+            if ok:
+                console.print(f"[green]✓ {msg}[/green]")
+            else:
+                console.print(f"[bold red]✗ {msg}[/bold red]")
+                if not Confirm.ask("[yellow]LM Studio olmadan devam etmek ister misiniz? (Fast mode'a geçilecek)[/yellow]", default=False):
+                    sys.exit(1)
+                resolved_mode = Mode.FAST
+                llm_backend = "ollama"
+                cfg = AppConfig(
+                    provider=resolved_provider, mode=resolved_mode, imap=imap_cfg,
+                    ollama=ollama_cfg, lm_studio=lm_studio_cfg, llm_backend=llm_backend,
+                    dry_run=dry_run, scan_limit=scan_limit,
+                )
+                console.print("[yellow]Fast mode'a geçildi.[/yellow]")
         else:
-            console.print(f"[bold red]✗ {msg}[/bold red]")
-            if not Confirm.ask("[yellow]Ollama olmadan devam etmek ister misiniz? (Fast mode'a geçilecek)[/yellow]", default=False):
-                sys.exit(1)
-            resolved_mode = Mode.FAST
-            cfg = AppConfig(
-                provider=resolved_provider, mode=resolved_mode, imap=imap_cfg,
-                ollama=ollama_cfg, dry_run=dry_run, scan_limit=scan_limit,
-            )
-            console.print("[yellow]Fast mode'a geçildi.[/yellow]")
+            with console.status("[cyan]Ollama bağlantısı kontrol ediliyor…[/cyan]", spinner="dots"):
+                ok, msg = check_ollama_health(ollama_cfg.base_url, selected_ollama_model)
+            if ok:
+                console.print(f"[green]✓ {msg}[/green]")
+            else:
+                console.print(f"[bold red]✗ {msg}[/bold red]")
+                if not Confirm.ask("[yellow]Ollama olmadan devam etmek ister misiniz? (Fast mode'a geçilecek)[/yellow]", default=False):
+                    sys.exit(1)
+                resolved_mode = Mode.FAST
+                cfg = AppConfig(
+                    provider=resolved_provider, mode=resolved_mode, imap=imap_cfg,
+                    ollama=ollama_cfg, lm_studio=lm_studio_cfg, llm_backend=llm_backend,
+                    dry_run=dry_run, scan_limit=scan_limit,
+                )
+                console.print("[yellow]Fast mode'a geçildi.[/yellow]")
 
     # Define engine locally to handle UnboundLocalError in finally block
     engine = None
@@ -395,7 +418,8 @@ def main(
 
                     def _llm_worker(idx_result):
                         idx, candidate = idx_result
-                        return idx, pro_analyze(candidate.mail, cfg.ollama)
+                        llm_cfg = cfg.lm_studio if cfg.llm_backend == "lm_studio" else cfg.ollama
+                        return idx, pro_analyze(candidate.mail, llm_cfg, cfg.llm_backend)
 
                     with ThreadPoolExecutor(max_workers=max_workers) as executor:
                         futures = {
