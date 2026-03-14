@@ -1,14 +1,24 @@
 import sqlite3
 from pathlib import Path
 from typing import Optional
+from contextlib import contextmanager
 
 from models import MailMeta
 
 DB_FILE = Path("mailshift.db")
 
+@contextmanager
+def get_db_connection():
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
 def init_db() -> None:
     """Initialize the SQLite database with required tables."""
-    with sqlite3.connect(DB_FILE) as conn:
+    with get_db_connection() as conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS mails_cache (
                 uid TEXT PRIMARY KEY,
@@ -47,7 +57,7 @@ def save_mails_cache(mails: list[MailMeta], batch_size: int = 500) -> None:
         (m.uid, m.subject, m.sender, m.date, m.size_bytes, m.body_preview, 1 if m.has_attachment else 0)
         for m in mails
     ]
-    with sqlite3.connect(DB_FILE) as conn:
+    with get_db_connection() as conn:
         for i in range(0, len(rows), batch_size):
             conn.executemany(
                 '''
@@ -65,7 +75,7 @@ def load_mails_cache() -> Optional[list[MailMeta]]:
         return None
     init_db()
     try:
-        with sqlite3.connect(DB_FILE) as conn:
+        with get_db_connection() as conn:
             cursor = conn.execute('''
                 SELECT uid, subject, sender, date, size_bytes, body_preview, has_attachment 
                 FROM mails_cache
@@ -100,7 +110,7 @@ def mark_uids_fetched(uids: list[str]) -> None:
     if not uids:
         return
     init_db()
-    with sqlite3.connect(DB_FILE) as conn:
+    with get_db_connection() as conn:
         conn.executemany(
             "INSERT OR IGNORE INTO fetch_checkpoint (uid) VALUES (?)",
             [(u,) for u in uids],
@@ -112,7 +122,7 @@ def get_fetched_uids() -> set[str]:
         return set()
     init_db()
     try:
-        with sqlite3.connect(DB_FILE) as conn:
+        with get_db_connection() as conn:
             cursor = conn.execute("SELECT uid FROM fetch_checkpoint")
             return {row[0] for row in cursor.fetchall()}
     except Exception:
@@ -123,5 +133,5 @@ def clear_checkpoint() -> None:
     if not DB_FILE.exists():
         return
     init_db()
-    with sqlite3.connect(DB_FILE) as conn:
+    with get_db_connection() as conn:
         conn.execute("DELETE FROM fetch_checkpoint")

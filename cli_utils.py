@@ -1,4 +1,5 @@
 import getpass
+import json
 import re
 import shutil
 import subprocess
@@ -9,6 +10,14 @@ from typing import Optional
 
 from rich import box
 from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
@@ -21,7 +30,7 @@ from config import (
     remove_from_blacklist,
     remove_from_whitelist,
 )
-from ui import console
+from ui import console, clear_console
 
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
@@ -36,6 +45,7 @@ def _prompt_email(label: str) -> str:
     while True:
         value = Prompt.ask(f"\n[bold cyan]{label}[/bold cyan]").strip()
         if _is_valid_email(value):
+            clear_console()
             return value
         console.print(
             f"[bold red]✗ Geçersiz e-posta adresi:[/bold red] [yellow]{value}[/yellow]\n"
@@ -53,6 +63,7 @@ def prompt_provider() -> Provider:
     t.add_row("[3]", "Custom", "your own IMAP server")
     console.print(Panel(t, title="[bold cyan]Mail Provider[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     choice = Prompt.ask("[bold]Provider[/bold]", choices=["1", "2", "3"], default="1")
+    clear_console()
     if choice == "1":
         return Provider.GMAIL
     elif choice == "2":
@@ -79,12 +90,46 @@ def prompt_custom_imap_settings() -> tuple[str, int, bool]:
         )
 
     use_ssl = Prompt.ask("[bold cyan]SSL kullanılsın mı?[/bold cyan]", choices=["y", "n"], default="y")
+    clear_console()
     return host, port, use_ssl.lower() == "y"
 
 
 def check_ollama_installed() -> bool:
     """Check if Ollama is installed on the system."""
     return shutil.which("ollama") is not None
+
+
+def install_ollama() -> bool:
+    """Download and install Ollama on Windows using PowerShell command."""
+    if sys.platform != "win32":
+        console.print("[red]Otomatik kurulum şu an sadece Windows sistemlerini destekliyor.[/red]")
+        console.print("Lütfen [link]https://ollama.com[/link] adresinden manuel kurun.")
+        return False
+
+    console.print("\n[bold yellow]Ollama indiriliyor ve kuruluyor...[/bold yellow]")
+    console.print("[dim]Komut: irm https://ollama.com/install.ps1 | iex[/dim]\n")
+    
+    try:
+        # PowerShell command to install Ollama
+        process = subprocess.Popen(
+            ["powershell", "-Command", "irm https://ollama.com/install.ps1 | iex"],
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            shell=True
+        )
+        process.wait()
+        
+        if process.returncode == 0:
+            console.print("\n[bold green]Ollama kurulum komutu başarıyla çalıştırıldı![/bold green]")
+            console.print("[yellow]Not: PATH değişikliklerinin geçerli olması için terminali veya uygulamayı yeniden başlatmanız gerekebilir.[/yellow]\n")
+            return True
+        else:
+            console.print(f"\n[bold red]Kurulum sırasında bir hata oluştu (Exit Code: {process.returncode})[/bold red]")
+            return False
+            
+    except Exception as e:
+        console.print(f"\n[bold red]Kurulum başlatılamadı:[/bold red] {e}")
+        return False
 
 
 def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
@@ -99,22 +144,18 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
 
     if sys.platform == "win32":
         try:
+            # CREATE_NO_WINDOW (0x08000000) prevents CMD window from popping up
+            creation_flags = 0x08000000
             subprocess.Popen(
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                startinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE),
+                stdin=subprocess.DEVNULL,
+                creationflags=creation_flags,
+                close_fds=True
             )
         except Exception:
-            try:
-                subprocess.Popen(
-                    ["cmd", "/c", "start", "", "ollama", "serve"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
-                )
-            except Exception:
-                return False
+            return False
     else:
         try:
             subprocess.Popen(
@@ -129,7 +170,7 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
     for attempt in range(max_retries):
         time.sleep(retry_delay)
         if get_ollama_models():
-            console.print("[green]Ollama başarıyla başlatıldı![/green]")
+            console.print("[green]Ollama başarıyla başlatıldı! (tamamen kapatmanız için görev yöneticisine bakmalısınız)[/green]")
             return True
 
     return False
@@ -145,6 +186,53 @@ def get_ollama_models(base_url: str = "http://localhost:11434", timeout: int = 5
         return [m["name"] for m in data.get("models", [])]
     except Exception:
         return []
+
+
+def download_ollama_model(model_name: str, base_url: str = "http://localhost:11434") -> bool:
+    """Download an Ollama model with a progress bar."""
+    import requests
+    
+    console.print(f"\n[bold yellow]Model indiriliyor:[/bold yellow] [bold cyan]{model_name}[/bold cyan]")
+    
+    try:
+        with requests.post(f"{base_url}/api/pull", json={"name": model_name}, stream=True) as resp:
+            resp.raise_for_status()
+            
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=console,
+                transient=True,
+            ) as progress:
+                task = progress.add_task(f"İndiriliyor {model_name}...", total=100)
+                
+                for line in resp.iter_lines():
+                    if line:
+                        data = json.loads(line.decode("utf-8"))
+                        status = data.get("status", "")
+                        
+                        if "total" in data and "completed" in data:
+                            total = data["total"]
+                            completed = data["completed"]
+                            # total 0 ise bölme hatasından kaçın
+                            if total > 0:
+                                percent = (completed / total) * 100
+                                progress.update(task, completed=percent, description=f"{status} ({completed/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)")
+                        else:
+                            progress.update(task, description=status)
+                            
+                        if status == "success":
+                            progress.update(task, completed=100)
+                            break
+                            
+        console.print(f"[bold green]✓ {model_name} başarıyla indirildi![/bold green]")
+        return True
+    except Exception as e:
+        console.print(f"[bold red]✗ Model indirilirken hata oluştu:[/bold red] {e}")
+        return False
 
 
 def prompt_mode() -> tuple[Mode, str]:
@@ -168,14 +256,44 @@ def prompt_mode() -> tuple[Mode, str]:
                 console.print(Panel(
                     "[bold yellow]Ollama sistemde bulunamadı![/bold yellow]\n\n"
                     "Pro modu kullanmak için Ollama'yı yüklemeniz gerekiyor.\n\n"
-                    "İndirmek için: [link]https://ollama.com[/link]\n\n"
-                    "Kurulumdan sonra uygulamayı yeniden başlatın.",
+                    "İndirmek için: [link]https://ollama.com[/link]",
                     title="[bold red]Ollama Gerekli[/bold red]",
                     border_style="red",
                     box=box.ROUNDED,
                 ))
-                console.print("[cyan]Fast moduna geçiliyor...[/cyan]")
-                return Mode.FAST, "qwen3.5:2B"
+
+                if sys.platform == "win32":
+                    should_install = Confirm.ask(
+                        "\n[bold yellow]Ollama şimdi otomatik kurulsun mu?[/bold yellow]\n"
+                        "[dim](Komut: irm https://ollama.com/install.ps1 | iex)[/dim]",
+                        default=True
+                    )
+                    
+                    if should_install:
+                        if install_ollama():
+                            console.print("\n[bold green]Ollama kuruldu. Uygulamayı yeniden başlatmanız önerilir.[/bold green]")
+                            # Try to wait a bit then start
+                            time.sleep(2)
+                            if start_ollama():
+                                available_models = get_ollama_models()
+                                if available_models:
+                                    # Fallthrough to model selection
+                                    pass
+                                else:
+                                    console.print("[cyan]Model bulunamadı. Lütfen daha sonra manuel kurun.[/cyan]")
+                                    return Mode.FAST, "qwen3.5:2B"
+                            else:
+                                console.print("[cyan]Ollama kuruldu ama başlatılamadı. Lütfen uygulamayı yeniden açın.[/cyan]")
+                                return Mode.FAST, "qwen3.5:2B"
+                        else:
+                            console.print("[cyan]Kurulum başarısız oldu. Manuel kurmanız gerekebilir.[/cyan]")
+                            return Mode.FAST, "qwen3.5:2B"
+                    else:
+                        console.print("[cyan]Fast moduna geçiliyor...[/cyan]")
+                        return Mode.FAST, "qwen3.5:2B"
+                else:
+                    console.print("[cyan]Fast moduna geçiliyor...[/cyan]")
+                    return Mode.FAST, "qwen3.5:2B"
 
             console.print("[yellow]Ollama çalışmıyor veya model bulunamadı.[/yellow]")
 
@@ -191,7 +309,7 @@ def prompt_mode() -> tuple[Mode, str]:
                     console.print("[red]Ollama başlatılamadı.[/red]")
             else:
                 console.print("\n[bold cyan]Ollama'yı manuel olarak başlatın:[/bold cyan]")
-                console.print("  terminal/cmd => ollama serve")
+                console.print("  terminal/cmd => ollama serve (tamamen kapatmanız için görev yöneticisine bakmalısınız)")
                 console.print("\n[cyan]Model listesini yeniden almak için Enter'a basın...[/cyan]")
                 Prompt.ask("")
                 available_models = get_ollama_models()
@@ -230,6 +348,11 @@ def prompt_mode() -> tuple[Mode, str]:
         else:
             idx = int(model_choice) - len(recommended_models) - 1
             model = non_rec_models[idx]
+        
+        # Eğer seçilen model önerilen modellerden biriyse ve sistemde yoksa indir
+        if model in recommended_models and not any(model.lower() == m.lower() for m in available_models):
+            download_ollama_model(model)
+            
         return mode, model
     
     return mode, "qwen3.5:2B"
@@ -246,6 +369,7 @@ def prompt_credentials(provider: Provider) -> tuple[str, str]:
         pt.add_row("[2]", "App Password oluşturmam gerekiyor (yönlendir)")
         console.print(Panel(pt, title="[bold cyan]Gmail Şifre Durumu[/bold cyan]", border_style="cyan", box=box.ROUNDED))
         choice = Prompt.ask("[bold]Seçim[/bold]", choices=["1", "2"], default="1")
+        clear_console()
 
         if choice == "2":
             console.print(Panel(
@@ -257,6 +381,7 @@ def prompt_credentials(provider: Provider) -> tuple[str, str]:
                 box=box.ROUNDED,
             ))
             Prompt.ask("[dim]Devam etmek için Enter'a basın[/dim]")
+            clear_console()
 
     elif provider == Provider.PROTON:
         username = _prompt_email("Proton Bridge e-posta adresi")
@@ -264,6 +389,7 @@ def prompt_credentials(provider: Provider) -> tuple[str, str]:
         username = Prompt.ask(f"\n[bold cyan]IMAP Kullanıcı Adı[/bold cyan]").strip()
 
     password = getpass.getpass("Şifre (App Password / Bridge şifresi): ")
+    clear_console()
     return username, password
 
 

@@ -129,38 +129,94 @@ WHITELIST_PATTERN = re.compile('|'.join(_WHITELIST_ESCAPED), re.IGNORECASE) if _
 
 
 DEFAULT_SYSTEM_PROMPT = """
-You are an email classifier. Classify each email as either SIL or TUT.
+Sadece tek bir kelime ile cevap ver: SIL veya TUT.
+Asla açıklama yapma, kelime dışında bir şey yazma.
+Eğer e-posta bir bülten (newsletter), kampanya, indirim veya promosyon ise SIL.
+Eğer e-posta kişisel, sipariş onaylı veya güvenlik uyarısı ise TUT.
 
-SIL = Delete: newsletters, promotions, marketing, mass-sent announcements, subscription updates, discount, indirim, sale, offer, % off, free shipping, limited time, bonus, gift card, coupon, deal, flash sale, black friday, cyber monday, campaign
+Ek kurallar (öncelikli):
+- Takvim daveti, toplantı daveti, iş içi duyuru veya ekip senkronizasyonu gibi çalışma mesajları her zaman TUT.
+- Kimlik avı (phishing) sinyali varsa SIL: "urgent", "account suspended", "verify your identity", şüpheli/sahte alan adı, acil linke tıklatma.
+- Fatura, abonelik, ödeme yöntemi güncelleme ve benzeri işlemsel (transactional) bildirimler TUT; yalnızca açık phishing sinyali varsa SIL.
+- Tek kullanımlık doğrulama kodu / OTP / "Doğrulama kodu" içeren güvenlik mesajları TUT.
+- Hesap özeti / ekstre / fatura / iade / ödeme alındı gibi resmi finansal bildirimler TUT.
+- "Yeni belge paylaşıldı", "SSH anahtarı eklendi", hesap etkinliği veya giriş bildirimi gibi meşru platform güvenlik/iş bildirimleri TUT.
+- Alan adı sahteciliği varsa SIL: marka alan adının sonuna ekstra domain eklenmesi (ör. `ing.com.tr-secure.info`, `paypal.com-verify.info`) veya bariz taklit domainler.
+- Sadece "doğrulayın" kelimesi tek başına phishing demek değildir; güvenilir gönderen + normal hesap aktivasyonu ise TUT.
+- Hesap açılışı/aktivasyonu için gelen "E-posta adresinizi doğrulayın" türü meşru platform doğrulama mailleri TUT (gönderen alan adı güvenilirse).
+- YouTube kanal/video yükleme bildirimleri, promosyon benzeri içerik önerileri ve düşük öncelikli içerik uyarıları SIL.
+- Elektrik/su/doğalgaz/telefon gibi düzenli fatura bildirimleri ve kurumsal yazılım lisans yenileme uyarıları TUT (gönderen güvenilirse).
+- Abone olunan analiz/uzun-form yayın bildirimleri (ör. Substack/Medium yeni yazı) varsayılan olarak TUT; açık promosyon/spam dili varsa SIL.
+- İşbirliği araçlarından gelen dosya/belge paylaşımı bildirimleri (Google Drive/Notion/Trello/Slack görev-güncelleme) TUT.
+- Güvenilir işbirliği alan adlarından gelen belge paylaşımı bildirimleri (özellikle `drive-shares-noreply@google.com`) TUT.
+- İçerik üretici abonelik bildirimleri (Medium/Substack/Patreon yeni içerik) varsayılan olarak TUT.
+- Patreon'dan gelen desteklenen içerik üretici güncellemeleri ("new post", "exclusive video", "new content") her zaman TUT; pazarlama spamı olmadığı sürece SIL yapılmaz.
+- "Tebrikler, çek/ödül/nakit kazandınız" türü beklenmeyen ödül vaatleri SIL; özellikle kişisel/banka bilgisi, telefon doğrulama veya ödül talep linki istiyorsa phishing kabul et.
+- Güvenilir banka alan adından gelen işlem onayı / harcama doğrulama / OTP güvenlik bildirimleri TUT (alan adı sahte değilse).
+- `@youtube.com` kaynaklı Premium deneme bitişi/abonelik yaşam döngüsü bildirimleri TUT; kanal video yükleme bildirimleri SIL.
+- `@microsoft.com` kaynaklı Microsoft 365 lisans/depolama uyarıları TUT (sahte alan adı sinyali yoksa).
+- `Twitter/X` yeni takipçi bildirimleri ("Yeni takipçi", "follow") düşük öncelikli sosyal bildirimdir ve SIL.
+- `Twitter/X` mention/etiket bildirimleri ("sizi etiketledi", "mention") TUT.
+- Coursera/Udemy gibi eğitim platformlarında kurs ilerleme, ödev ve sertifika bildirimleri TUT; yalnızca indirim/promosyon içerikleri SIL.
+- Reddit topluluk etkileşim bildirimleri (yorum/upvote/popüler konu) TUT.
+- Güvenilir bankadan gelen işlem onayı mesajı link içerse bile (alan adı güvenilirse) TUT; sahte alan adı varsa SIL.
+- Pazarlama platformu onboarding/welcome bültenleri (ör. MailChimp "Welcome/Let's get started") SIL.
 
-TUT = Keep: personal messages, transactional (orders, shipping), meeting requests, anything requiring direct attention
+SIL (Sil):
+- Haftalık özetler, ipuçları, rehberler
+- Promosyonlar, pazarlama, kampanyalar
+- İndirimler, satışlar, fırsatlar, kuponlar
+- Kimlik avı, sahte doğrulama, hesap kapatma tehdidi
 
-ALWAYS classify as TUT (never SIL), regardless of wording:
-- Account changes, password resets, security alerts
-- Data access or transfer requests
-- Login notifications, verification codes
-- Any email implying an action was taken on the recipient's account
+TUT (Tut):
+- Kişisel mesajlar, doğrudan iletişim
+- Siparişler, kargo onayları, faturalar
+- Şifre sıfırlama, güvenlik uyarıları, doğrulama
+- Takvim / toplantı / iş davetleri
+- Abonelik ve ödeme yöntemi güncelleme bildirimleri (işlemsel içerik)
+- OTP / doğrulama kodu / hesap özeti / belge paylaşımı / SSH anahtarı eklendi bildirimleri
+- Elektrik-su-doğalgaz faturası ve kurumsal lisans yenileme bildirimleri
+- Substack/Medium gibi abone olunan analiz yazısı bildirimleri
+- Patreon/yaratıcı içerik abonelik bildirimleri
+- Drive/Notion/Trello gibi işbirliği araçlarında dosya ve görev bildirimleri
+- Güvenilir banka işlem onayı/OTP ve meşru abonelik yaşam döngüsü uyarıları (YouTube Premium, Microsoft 365)
 
-Rules:
-- If the email contains ANY discount, promotion, sale, offer, coupon, bonus, free, % off, or similar marketing language → SIL
-- Output ONLY the label: SIL or TUT
-- No explanation, no punctuation, nothing else
+Çıktı SADECE: SIL veya TUT olmalı.
 
-Examples:
-"Get 50% off all items! Shop now." → SIL
-"Your order #12345 has shipped." → TUT
-"Weekly Newsletter – Top 10 recipes" → SIL
-"Hi John, can we meet tomorrow at 3pm?" → TUT
-"Action required: verify your account" → TUT
-"You are subscribed to Product Updates" → SIL
-"Meeting reminder: standup at 10 AM" → TUT
-"Your Apple ID information was updated." → TUT
-"A request was made to transfer your Google data." → TUT
-"Today only: 40% discount on all products" → SIL
-"Free shipping on orders over $50" → SIL
-"Your exclusive offer awaits - 25% off" → SIL
+Örnekler:
+"Weekly Tech Digest" -> SIL
+"Get 50% off" -> SIL
+"Your order shipped" -> TUT
+"Invitation: Team Sync" -> TUT
+"Your account will be suspended in 24 hours" -> SIL
+"Action Required: Update your payment information" -> TUT
+"Doğrulama kodu: 583920" -> TUT
+"Mart 2026 Hesap Özeti" -> TUT
+"Yeni belge paylaşıldı: Sözleşme_v2.pdf" -> TUT
+"GitHub: Yeni SSH anahtarı eklendi" -> TUT
+"Acil: Kart Bilgilerinizi Güncelleyin" + `ing.com.tr-secure.info` -> SIL
+"E-posta adresinizi doğrulayın" + `verify@discord.com` -> TUT
+"YouTube: Abone olduğunuz kanal yeni video yükledi" -> SIL
+"Elektrik faturanız hazır – CK Enerji" -> TUT
+"Substack: Yeni yazı" -> TUT
+"Microsoft 365: Lisans yenileme uyarısı" -> TUT
+"Yeni belge paylaşıldı: Sözleşme_v2.pdf" -> TUT
+"Yeni Medium yazısı" -> TUT
+"Patreon: Yeni içerik yayınlandı" -> TUT
+"Welcome to MailChimp! Let's get started" -> SIL
+"Patreon: Yeni içerik yayınlandı – Exclusive Video" -> TUT
+"Tebrikler! 1000 TL Getir Çeki Kazandınız" -> SIL
+"Tebrikler! 20.000 TL'lik Çek Kazandınız" -> SIL
+"Ziraat Bankası: Yeni işlem onayı gerekiyor" + `@ziraatbank.com.tr` -> TUT
+"YouTube Premium: Deneme süreniz bitiyor" -> TUT
+"Microsoft 365: Depolama alanınız dolmak üzere" -> TUT
+"Yeni belge paylaşıldı: Sözleşme_v2.pdf" + `drive-shares-noreply@google.com` -> TUT
+"Twitter/X: Yeni takipçi" -> SIL
+"Twitter/X: Yeni mention – sizi etiketledi" -> TUT
+"Coursera: kursunda yeni ödev yayınlandı" -> TUT
+"Reddit: r/... popüler konu" -> TUT
 
-Email to classify:
+E-posta:
 """
 
 
@@ -168,7 +224,7 @@ class OllamaConfig(BaseModel):
     """Settings for the local Ollama LLM endpoint."""
 
     base_url: str = "http://localhost:11434"
-    model: str = "qwen3.5:2B"
+    model: str = "qwen3.5:0.8B"
     timeout: int = 300
     max_body_chars: int = 500
 

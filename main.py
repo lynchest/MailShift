@@ -17,15 +17,8 @@ Usage examples
 
 from __future__ import annotations
 
-import csv
-import getpass
-import json
-import shutil
 import sys
-import logging
 import io
-from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 if sys.platform == "win32":
@@ -47,8 +40,6 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from rich.prompt import Confirm, Prompt
-from rich.table import Table
-from rich.text import Text
 
 from config import (
     AppConfig,
@@ -77,7 +68,13 @@ from engine import (
 from database import save_mails_cache, load_mails_cache
 from pro_analyzer import check_ollama_health
 
-from ui import console, print_banner, build_results_table, build_stats_panel
+from ui import (
+    console,
+    print_banner,
+    build_results_table,
+    build_stats_panel,
+    clear_console,
+)
 from history import save_cleanup_log, export_scan_results, print_history
 from logger import log
 from cli_utils import (
@@ -89,7 +86,15 @@ from cli_utils import (
     prompt_provider,
 )
 
-
+# --- YENİ EKLENEN YARDIMCI FONKSİYON ---
+def clean_text(text: Optional[str], max_len: int = 35) -> str:
+    """Metin içindeki satır atlama (\n, \r) ve sekmeleri temizler, güvenli uzunluğa kırpar."""
+    if not text:
+        return "(bilinmiyor)"
+    # .split() tüm boşluk ve satır sonu karakterlerini ayırır, " ".join() bunları tek boşlukla birleştirir.
+    cleaned = " ".join(text.split())
+    return cleaned[:max_len] + ("…" if len(cleaned) > max_len else "")
+# ---------------------------------------
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option("--provider", type=click.Choice(["gmail", "proton", "custom"]), default=None, help="Mail provider.")
@@ -137,8 +142,6 @@ def main(
         handle_uninstall()
         return
 
-    print_banner()
-
     # ---- resolve provider / mode (interactive if not provided) ----
     resolved_provider = Provider(provider) if provider else prompt_provider()
     resolved_mode, selected_model = (Mode(mode), ollama_model) if mode else prompt_mode()
@@ -175,6 +178,8 @@ def main(
         ollama=ollama_cfg, dry_run=dry_run,
         scan_limit=scan_limit,
     )
+
+    clear_console()
 
     # ---- summary of what we're about to do ----
     sys_info = get_system_info()
@@ -260,9 +265,10 @@ def main(
 
                 def _on_fetch(meta: MailMeta) -> None:
                     mails.append(meta)  # append new mail to our total list
+                    # DÜZELTME: Satır sonu karakterlerinden arındırma
                     progress.update(
                         task, advance=1,
-                        current=f"{meta.sender[:30]}" if meta.sender else "(unknown sender)",
+                        current=clean_text(meta.sender)
                     )
 
                 engine.fetch_headers_concurrent(missing_uids, progress_cb=_on_fetch)
@@ -282,9 +288,10 @@ def main(
                     task = progress.add_task("body_fetch", total=len(need_body), current="Starting…")
 
                     def _on_body(meta: MailMeta) -> None:
+                        # DÜZELTME: Satır sonu karakterlerinden arındırma
                         progress.update(
                             task, advance=1,
-                            current=f"{meta.sender[:30]}" if meta.sender else "…",
+                            current=clean_text(meta.sender)
                         )
 
                     engine.fetch_body_for_cached_mails(need_body, progress_cb=_on_body)
@@ -313,7 +320,9 @@ def main(
                     res = fast_analyze(mail)
                     fast_results.append(res)
                     icon = "🗑" if res.decision == "SIL" else "✅"
-                    subj = mail.subject[:40] or "(no subject)"
+                    
+                    # DÜZELTME: Satır sonu karakterlerinden arındırma
+                    subj = clean_text(mail.subject)
                     progress.update(task, advance=1, current=f"{icon} {subj}")
 
             sil_candidates = [r for r in fast_results if r.decision == "SIL"]
@@ -356,7 +365,9 @@ def main(
                                 idx, res = future.result()
                                 temp[idx] = res
                                 icon = "🗑" if res.decision == "SIL" else "✅"
-                                subj = res.mail.subject[:40] or "(no subject)"
+                                
+                                # DÜZELTME: Satır sonu karakterlerinden arındırma
+                                subj = clean_text(res.mail.subject)
                                 progress.update(task, advance=1, current=f"{icon} {subj}")
                             except Exception as exc:
                                 i = futures[future]
@@ -404,7 +415,9 @@ def main(
                 def _on_analyze(result: ScanResult) -> None:
                     scan_results.append(result)
                     icon = "🗑" if result.decision == "SIL" else "✅"
-                    subj = result.mail.subject[:40] or "(no subject)"
+                    
+                    # DÜZELTME: Satır sonu karakterlerinden arındırma
+                    subj = clean_text(result.mail.subject)
                     progress.update(task, advance=1, current=f"{icon} {subj}")
 
                 _, stats = engine.analyze(mails, progress_cb=_on_analyze)
@@ -456,6 +469,7 @@ def main(
                 choices=["1", "2", "3"],
                 default="3",
             )
+            clear_console()
 
             if choice in ("1", "2"):
                 delete_uids = [r.mail.uid for r in to_delete]
@@ -526,4 +540,5 @@ def main(
 
 
 if __name__ == "__main__":
+    clear_console()
     main()

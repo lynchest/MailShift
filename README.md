@@ -11,6 +11,9 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
   - `pro`  – two-phase analysis: heuristic + local Ollama LLM for smarter detection
     - Phase 1: Fast heuristic scan
     - Phase 2: LLM verification on suspicious messages
+        - Robust decision parser accepts `SIL/TUT` text or JSON-style outputs and normalizes Turkish `SİL/SIL` variants
+        - Ollama call uses `/api/chat` with structured JSON decision output for better small-model reliability
+        - Pro mode disables model "thinking" output and uses a larger generation budget to prevent empty decision responses on 2B/4B models
 - **Body preview in Pro mode**: Fetches email body content for better LLM analysis
 - **Dry-run default** – preview before any deletion
 - **Delete options**: Permanent delete or move to Trash
@@ -165,4 +168,6 @@ Run Proton Bridge locally, then connect with bridge credentials.
 
 - Python 3.10+
 - IMAP access to your email provider
-- For Pro mode: [Ollama](https://ollama.com) running locally
+- For Pro mode: [Ollama](https://ollama.com) running locally.
+  - **Power User Tip**: Set the `OLLAMA_NUM_PARALLEL` environment variable to increase concurrent workers (default is 4).
+  - **Note**: To close Ollama completely on Windows, you must use the Task Manager as it often runs without a visible window or system tray icon.

@@ -8,6 +8,13 @@ from models import ScanResult, ScanStats
 
 console = Console()
 
+
+def clear_console() -> None:
+    """Terminale temizle komutu göndererek daha minimal bir yapı sunar."""
+    console.clear()
+    print_banner()
+
+
 BANNER = (
     " __  __      _ _ ____  _  __ _   \n"
     r"|  \/  | __ _(_) / ___||(_)/ _| |_ " + "\n"

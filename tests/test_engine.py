@@ -211,22 +211,28 @@ def _mock_ollama_response(response_text: str):
     """Helper that creates a mocked requests.Response."""
     mock_resp = MagicMock()
     mock_resp.raise_for_status.return_value = None
-    mock_resp.json.return_value = {"response": response_text}
+    mock_resp.json.return_value = {"message": {"content": response_text}}
     return mock_resp
 
 
 def test_pro_analyze_sil_decision():
     meta = _make_meta(subject="Big sale newsletter!", body="Unsubscribe here")
-    with patch("pro_analyzer.requests.post", return_value=_mock_ollama_response("SIL")) as mock_post:
+    with patch("pro_analyzer._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+        mock_session.post.return_value = _mock_ollama_response("SIL")
         result = pro_analyze(meta, _make_ollama_cfg())
     assert result.decision == "SIL"
     assert result.reason.startswith("llm:SIL")
-    mock_post.assert_called_once()
+    mock_session.post.assert_called_once()
 
 
 def test_pro_analyze_tut_decision():
     meta = _make_meta(subject="Meeting notes", body="Please review the attached agenda.")
-    with patch("pro_analyzer.requests.post", return_value=_mock_ollama_response("TUT")) as mock_post:
+    with patch("pro_analyzer._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+        mock_session.post.return_value = _mock_ollama_response("TUT")
         result = pro_analyze(meta, _make_ollama_cfg())
     assert result.decision == "TUT"
     assert result.reason.startswith("llm:TUT")
@@ -235,7 +241,10 @@ def test_pro_analyze_tut_decision():
 def test_pro_analyze_falls_back_to_tut_on_error():
     """Any network / API error must default to TUT (keep) to protect important mail."""
     meta = _make_meta(subject="Important update")
-    with patch("pro_analyzer.requests.post", side_effect=requests.ConnectionError("refused")):
+    with patch("pro_analyzer._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+        mock_session.post.side_effect = requests.ConnectionError("refused")
         result = pro_analyze(meta, _make_ollama_cfg())
     assert result.decision == "TUT"
     assert "llm-error" in result.reason
@@ -252,10 +261,15 @@ def test_pro_analyze_truncates_body_to_max_chars():
         captured_payload.update(json)
         return _mock_ollama_response("TUT")
 
-    with patch("pro_analyzer.requests.post", side_effect=capture_post):
+    with patch("pro_analyzer._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+        mock_session.post.side_effect = capture_post
         pro_analyze(meta, cfg)
 
-    assert len(captured_payload.get("prompt", "")) <= 500
+    messages = captured_payload.get("messages", [])
+    user_msg = messages[1]["content"] if len(messages) > 1 else ""
+    assert len(user_msg) <= 900
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +318,10 @@ def test_engine_analyze_pro_mode_uses_llm_for_flagged():
     engine = MailEngine(cfg)
     mails = [_make_meta(uid="1", body="unsubscribe – big sale!")]
 
-    with patch("pro_analyzer.requests.post", return_value=_mock_ollama_response("SIL")):
+    with patch("pro_analyzer._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+        mock_session.post.return_value = _mock_ollama_response("SIL")
         results, stats = engine.analyze(mails)
 
     assert stats.marked_for_deletion == 1
@@ -317,7 +334,10 @@ def test_engine_analyze_pro_mode_llm_overrides_heuristic_tut():
     engine = MailEngine(cfg)
     mails = [_make_meta(uid="1", body="unsubscribe")]
 
-    with patch("pro_analyzer.requests.post", return_value=_mock_ollama_response("TUT")):
+    with patch("pro_analyzer._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+        mock_session.post.return_value = _mock_ollama_response("TUT")
         results, stats = engine.analyze(mails)
 
     assert stats.marked_for_deletion == 0
@@ -330,10 +350,12 @@ def test_engine_analyze_pro_mode_clean_mail_skips_llm():
     engine = MailEngine(cfg)
     mails = [_make_meta(uid="1", subject="Hello", body="Let's meet tomorrow.")]
 
-    with patch("pro_analyzer.requests.post") as mock_post:
+    with patch("pro_analyzer._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
         results, stats = engine.analyze(mails)
 
-    mock_post.assert_not_called()
+    mock_session.post.assert_not_called()
     assert results[0].decision == "TUT"
 
 
