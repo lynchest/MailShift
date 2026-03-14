@@ -23,6 +23,10 @@ No other build or lint step is configured.
 
 - **Python interpreter**: `py -3.14` — not `python`, not `python3`.
 - **Keyword lists**: `whitelist.json` and `blacklist.json` are plain JSON arrays at the project root. `JUNK_PATTERN` and `WHITELIST_PATTERN` are compiled once at import time in `config.py`. Runtime mutations via `add_to_blacklist()` / `add_to_whitelist()` update the JSON file but do **not** update the in-memory regex — a process restart is required for changes to take effect in analysis.
+- **Fast analyzer safety guards**: `fast_analyzer.py` has a built-in keep-guard that forces `TUT` for premium lifecycle expiry notices, verification-code/OTP mails, and Drive/cloud storage fullness alerts before junk matching. Keep this guard intact unless there is a stronger safety replacement.
+- **Fast analyzer order**: Decision flow is `has_attachment -> whitelist(TUT) -> safety-guard(TUT) -> blacklist(SIL) -> no match(TUT)`. Preserve this order unless a requirement explicitly changes it.
+- **Fast analyzer text split**: Whitelist and safety-guard checks run against `full_text` (subject + sender + body_preview). Blacklist matching runs against `content_text` (subject + body_preview only, **excluding sender**) to prevent false positives from legitimate automated senders such as `no-reply@github.com` matching the `"no-reply"` rule.
+- **Turkish case normalization**: `fast_analyzer._normalize()` replaces `İ` (U+0130) with `i` then lowercases before matching. Both `full_text` and `content_text` pass through this function, so all regex matches return lowercase tokens in `ScanResult.reason`.
 - **`analyzer.py`** is a re-export shim only. Do not add logic there.
 - **Console output**: Use `from ui import console` (Rich console) for any new terminal output. Do not use bare `print()` — stdout is wrapped for UTF-8 on Windows and `print()` bypasses Rich's rendering.
 - **No YAML**: The project uses JSON throughout. `requirements.txt` does not include pyyaml.

@@ -6,6 +6,9 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 
 - **Multi provider support**: Gmail (IMAP + App Password), Proton Mail (via Proton Bridge), and Custom IMAP servers
 - **Attachment protection**: Emails with attachments are never deleted
+- **Fast-mode safety guards**: Premium lifecycle expiry notices, verification code (OTP) emails, and Google Drive/cloud storage fullness alerts are force-kept in Fast mode before junk checks
+- **Fast-mode false-positive reduction**: Blacklist matching excludes the sender address so legitimate automated senders (e.g. `no-reply@github.com`) never trigger a junk decision; whitelist and safety-guard still consider the full sender context
+- **Turkish case normalization**: Fast-mode text is normalized (Turkish İ → i) before heuristic matching, fixing missed matches on properly-capitalised Turkish subjects
 - **Two scan modes**:
   - `fast` – heuristic keyword matching (blacklist/whitelist)
   - `pro`  – two-phase analysis: heuristic + local Ollama LLM for smarter detection
@@ -138,7 +141,8 @@ python main.py --list-keywords
 1. **Connect** – IMAP authentication to inbox
 2. **Fetch** – retrieve email headers (concurrent), body for Pro mode
 3. **Analyze**:
-   - Fast: regex match against `blacklist.json` / `whitelist.json`
+    - Fast: whitelist-first flow (`whitelist.json` match => `TUT`), then suspicious check via `blacklist.json` (`SIL`)
+    - Plus built-in safety guards that force `TUT` for premium expiry lifecycle notices, verification-code mails, and Drive/cloud storage quota-full alerts
    - Pro: two-phase analysis
      - Phase 1: heuristic scan to find suspicious messages
      - Phase 2: run matched mail through Ollama LLM for verification
