@@ -270,11 +270,18 @@ def stop_ollama() -> bool:
             return False
 
 
-def cleanup_ollama_if_it_was_started_by_us():
-    """Stop Ollama if it was automatically started during this session."""
+def cleanup_ollama_if_it_was_started_by_us(model_name: Optional[str] = None):
+    """
+    Stop Ollama if it was automatically started during this session.
+    If it was already running, just offload the model.
+    """
     if _OLLAMA_STARTED_BY_US:
         console.print("[cyan]Ollama otomatik olarak başlatılmıştı, şimdi kapatılıyor...[/cyan]")
         stop_ollama()
+    elif model_name:
+        console.print(f"[cyan]Ollama zaten çalışıyordu, {model_name} modeli bellekten tahliye ediliyor...[/cyan]")
+        from pro_analyzer import unload_ollama_model
+        unload_ollama_model(model=model_name)
 
 
 def _is_ollama_running() -> bool:
@@ -292,6 +299,7 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
     Try to start Ollama in the background.
     Returns True if Ollama is now running, False otherwise.
     """
+    global _OLLAMA_STARTED_BY_US
     console.print("\n[yellow]Ollama çalışmıyor, başlatılmaya çalışılıyor...[/yellow]")
 
     if not check_ollama_installed():
@@ -304,6 +312,7 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
         time.sleep(retry_delay)
         if get_ollama_models():
             console.print("[green]Ollama başarıyla başlatıldı! (tamamen kapatmanız için görev yöneticisine bakmalısınız)[/green]")
+            _OLLAMA_STARTED_BY_US = True
             return True
 
     return False

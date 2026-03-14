@@ -170,6 +170,67 @@ def check_lm_studio_health(base_url: str = "http://localhost:1234", model: str =
     )
 
 
+def unload_lm_studio_models(base_url: str = "http://localhost:1234", model_id: Optional[str] = None) -> list[str]:
+    """
+    LM Studio 0.4.0+ için yüklü modelleri VRAM'den tahliye etmeye çalışır.
+    model_id verilirse sadece o modeli, verilmezse tüm modelleri tahliye eder.
+    """
+    unloaded = []
+    try:
+        # 1. Yüklü modelleri listele
+        resp = _get_session().get(f"{base_url}/v1/models", timeout=3)
+        if resp.status_code != 200:
+            return []
+
+        models = resp.json().get("data", [])
+        for m in models:
+            m_id = m.get("id")
+            if not m_id:
+                continue
+
+            # Eğer belirli bir model istenmişse ve bu o değilse atla
+            if model_id and model_id.lower() not in m_id.lower():
+                continue
+
+            # 2. Tahliye (unload) isteği gönder
+            try:
+                unload_resp = _get_session().post(
+                    f"{base_url}/api/v1/models/unload",
+                    json={"instance_id": m_id},
+                    timeout=3
+                )
+                if unload_resp.status_code == 200:
+                    unloaded.append(m_id)
+            except Exception:
+                continue
+
+    except Exception as exc:
+        log.debug(f"LM Studio model tahliye işlemi başarısız: {exc}")
+
+    return unloaded
+
+
+def unload_ollama_model(base_url: str = "http://localhost:11434", model: str = ""):
+    """
+    Ollama modelini VRAM'den tahliye eder. 
+    keep_alive parametresini 0 set ederek modeli serbest bırakır.
+    """
+    if not model:
+        return
+    try:
+        # /api/chat veya /api/generate üzerinden keep_alive=0 göndererek unload ederiz
+        _get_session().post(
+            f"{base_url}/api/chat",
+            json={"model": model, "messages": [], "keep_alive": 0},
+            timeout=3
+        )
+    except Exception as exc:
+        log.debug(f"Ollama model tahliye işlemi başarısız: {exc}")
+
+
+
+
+
 # ── LLM Provider abstraction ─────────────────────────────────────────────
 
 class LLMProvider(ABC):

@@ -71,7 +71,12 @@ from engine import (
     ScanStats,
 )
 from database import save_mails_cache, load_mails_cache
-from pro_analyzer import check_ollama_health, check_lm_studio_health, close_ollama_session
+from pro_analyzer import (
+    check_ollama_health,
+    check_lm_studio_health,
+    close_ollama_session,
+    unload_lm_studio_models,
+)
 
 from ui import (
     console,
@@ -473,6 +478,13 @@ def main(
 
                 # Combine TUT from fast + LLM results
                 scan_results = tut_results + llm_verified
+
+                # model offloading (LM Studio specific)
+                if cfg.llm_backend == "lm_studio":
+                    with console.status("[cyan]LM Studio modeli VRAM'den tahliye ediliyor…[/cyan]", spinner="dots"):
+                        unloaded = unload_lm_studio_models(cfg.lm_studio.base_url, selected_ollama_model)
+                    if unloaded:
+                        console.print(f"[green]✓ LM Studio modeli ({', '.join(unloaded)}) tahliye edildi.[/green]")
             else:
                 scan_results = fast_results
 
@@ -618,9 +630,18 @@ def main(
         if engine is not None:
             engine.disconnect()
 
-        # Pro modda oturum ve otomatik başlatılan Ollama sürecini kapat
+        # Eğer Ollama backend seçildiyse ve Pro moddaysak model ismini göndererek cleanup/offload yap
+        # Eğer biz başlattıysak her durumda kapatır, kullanıcı başlattıysa sadece modeli offload eder.
+        is_ollama_used = (locals().get('resolved_mode') == Mode.PRO and locals().get('llm_backend') == 'ollama')
+        target_model = selected_ollama_model if (is_ollama_used and 'selected_ollama_model' in locals()) else None
+        cleanup_ollama_if_it_was_started_by_us(model_name=target_model)
+
+        # Oturumu kapat
         close_ollama_session()
-        cleanup_ollama_if_it_was_started_by_us()
+
+        # LM Studio offload fallback (sessizce)
+        if 'cfg' in locals() and cfg and cfg.llm_backend == "lm_studio":
+            unload_lm_studio_models(cfg.lm_studio.base_url, cfg.lm_studio.model)
 
 
 if __name__ == "__main__":
