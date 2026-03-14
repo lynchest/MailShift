@@ -37,6 +37,7 @@ No other build or lint step is configured.
 - `delete_mails()` and `move_to_trash()` both call `self._conn.expunge()` after flagging. Removing expunge silently leaves messages flagged but not deleted.
 - `fetch_headers_concurrent` is sequential at the IMAP level (single connection, chunked). The name is misleading — do not add actual per-thread IMAP connections without careful locking.
 - `AppConfig`, `IMAPConfig`, and `OllamaConfig` are frozen Pydantic models. Do not attempt in-place mutation.
+- `hardware.py` detects NVIDIA first, then Intel/AMD GPUs on Windows via `Win32_VideoController` (PowerShell CIM query). Shared VRAM can be estimated from system RAM when `AdapterRAM` is not usable.
 
 ## Known gotchas
 
@@ -48,3 +49,4 @@ No other build or lint step is configured.
 - `pro_analyzer.py` uses Ollama `/api/chat` with a JSON decision schema (`decision: SIL|TUT`) and reads `message.content` first (then `response` fallback). This avoids empty-output failures seen with some small models on `/api/generate`.
 - `pro_analyzer.py` sends `think: false` and a higher `num_predict` budget for `qwen3.5:2B/4B` so the model does not spend output tokens on hidden reasoning and leave `message.content` empty.
 - **Ollama Visibility**: Ollama on Windows often runs without a visible window or system tray icon. To completely terminate it, users must use the Task Manager.
+- Intel/AMD GPU detection in MailShift is for worker sizing and UI reporting only; actual model offload still depends on Ollama runtime/backend support and drivers.

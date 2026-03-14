@@ -19,6 +19,8 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 - **Delete options**: Permanent delete or move to Trash
 - **Concurrent fetching** – multi-threaded IMAP operations
 - **Auto worker calculation** – automatically calculates optimal thread count based on hardware
+    - Detects NVIDIA GPUs and Intel/AMD GPUs on Windows for Pro mode worker sizing
+    - Intel/AMD integrated GPU VRAM may be estimated from shared system RAM when dedicated VRAM is not exposed by the driver
 - **Cache support** – skip re-fetching headers on repeat scans
 - **Rich CLI UI** – progress bars, tables, colored output with Turkish/English
 - **Cleanup history** – view past deletion reports
@@ -169,5 +171,6 @@ Run Proton Bridge locally, then connect with bridge credentials.
 - Python 3.10+
 - IMAP access to your email provider
 - For Pro mode: [Ollama](https://ollama.com) running locally.
+    - Intel/AMD GPU acceleration still depends on Ollama backend support/driver stack; if Ollama cannot offload, inference can continue on CPU even when MailShift detects the GPU.
   - **Power User Tip**: Set the `OLLAMA_NUM_PARALLEL` environment variable to increase concurrent workers (default is 4).
   - **Note**: To close Ollama completely on Windows, you must use the Task Manager as it often runs without a visible window or system tray icon.

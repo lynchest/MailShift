@@ -7,6 +7,7 @@ import re
 import platform
 import subprocess
 import os
+import json
 from dataclasses import dataclass
 from typing import Optional
 
@@ -40,7 +41,7 @@ def get_system_info() -> SystemInfo:
     if platform.system() == "Darwin" and platform.machine() == "arm64":
         gpu_info = _get_apple_silicon_info(total_ram, available_ram)
     else:
-        gpu_info = _get_nvidia_gpu_info()
+        gpu_info = _get_nvidia_gpu_info(total_ram, available_ram)
 
     return SystemInfo(
         cpu_count=cpu_count,
@@ -70,7 +71,83 @@ def _get_apple_silicon_info(total_ram: float, available_ram: float) -> dict:
     }
 
 
-def _get_nvidia_gpu_info() -> dict:
+def _intel_shared_vram_estimate(total_ram_gb: float, available_ram_gb: float) -> tuple[float, float]:
+    """Estimate Intel iGPU shared memory to avoid reporting zero VRAM on UMA systems."""
+    # Typical integrated GPU shared budget is up to ~50% RAM; keep this conservative.
+    total_shared = min(total_ram_gb * 0.5, 16.0)
+    available_shared = min(available_ram_gb * 0.5, total_shared)
+    return round(total_shared, 1), round(max(available_shared, 0.0), 1)
+
+
+def _get_windows_video_controllers() -> list[dict]:
+    if platform.system() != "Windows":
+        return []
+
+    cmd = [
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        "Get-CimInstance Win32_VideoController | "
+        "Select-Object Name,AdapterRAM,DriverVersion | ConvertTo-Json -Compress",
+    ]
+
+    try:
+        raw = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=5).decode("utf-8", errors="replace").strip()
+        if not raw:
+            return []
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else [parsed]
+    except Exception:
+        return []
+
+
+def _get_windows_gpu_info(
+    total_ram_gb: float,
+    available_ram_gb: float,
+    vendor_tokens: tuple[str, ...],
+) -> dict:
+    result = {"has_gpu": False, "name": "None", "total_vram_gb": 0.0, "available_vram_gb": 0.0, "driver": "None"}
+
+    gpus = _get_windows_video_controllers()
+    if not gpus:
+        return result
+
+    for gpu in gpus:
+        name = str(gpu.get("Name", "") or "").strip()
+        lowered = name.lower()
+        if not any(token in lowered for token in vendor_tokens):
+            continue
+
+        adapter_ram_raw = gpu.get("AdapterRAM")
+        adapter_ram = int(adapter_ram_raw) if isinstance(adapter_ram_raw, (int, float, str)) and str(adapter_ram_raw).isdigit() else 0
+        total_vram = round(adapter_ram / (1024 ** 3), 1) if adapter_ram > 0 else 0.0
+        if total_vram <= 0:
+            total_vram, available_vram = _intel_shared_vram_estimate(total_ram_gb, available_ram_gb)
+        else:
+            available_vram = min(total_vram, round(available_ram_gb * 0.5, 1))
+
+        result.update({
+            "has_gpu": True,
+            "name": name,
+            "total_vram_gb": total_vram,
+            "available_vram_gb": available_vram,
+            "driver": str(gpu.get("DriverVersion", "Unknown") or "Unknown").strip(),
+        })
+        return result
+
+    return result
+
+
+def _get_intel_gpu_info_windows(total_ram_gb: float, available_ram_gb: float) -> dict:
+    return _get_windows_gpu_info(total_ram_gb, available_ram_gb, ("intel",))
+
+
+def _get_amd_gpu_info_windows(total_ram_gb: float, available_ram_gb: float) -> dict:
+    # ATI token is kept for older AMD driver/device naming.
+    return _get_windows_gpu_info(total_ram_gb, available_ram_gb, ("amd", "radeon", "ati"))
+
+
+def _get_nvidia_gpu_info(total_ram_gb: float, available_ram_gb: float) -> dict:
     result = {"has_gpu": False, "name": "None", "total_vram_gb": 0.0, "available_vram_gb": 0.0, "driver": "None"}
     
     if PYNVML_AVAILABLE:
@@ -118,6 +195,14 @@ def _get_nvidia_gpu_info() -> dict:
                 })
     except Exception:
         pass
+
+    intel_result = _get_intel_gpu_info_windows(total_ram_gb, available_ram_gb)
+    if intel_result["has_gpu"]:
+        return intel_result
+
+    amd_result = _get_amd_gpu_info_windows(total_ram_gb, available_ram_gb)
+    if amd_result["has_gpu"]:
+        return amd_result
     
     return result
 
