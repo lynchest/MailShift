@@ -433,17 +433,24 @@ def prompt_mode() -> tuple[Mode, str]:
         mt.add_column(style="dim")
         
         recommended_models = [
-            ("qwen3.5:0.8B", "%95 Accurate"),
-            ("qwen3.5:2B", "Recommended"),
-            ("qwen3.5:4B", "Recommended"),
+            ("qwen3.5:0.8B", "%95 Accurate", "Fast"),
+            ("qwen3.5:2B", "Recommended", "Balanced"),
+            ("qwen3.5:4B", "Recommended", "Slower"),
         ]
 
-        for idx, (rec_model, badge) in enumerate(recommended_models, start=1):
+        SPEED_COLOR = {
+            "Fast": "[bold green]Fast[/bold green]",
+            "Balanced": "[bold yellow]Balanced[/bold yellow]",
+            "Slower": "[bold red]Slower[/bold red]",
+        }
+
+        for idx, (rec_model, badge, speed) in enumerate(recommended_models, start=1):
             is_available = any(rec_model.lower() == m.lower() for m in available_models)
             status = "[bold green]Mevcut[/bold green]" if is_available else "[bold red]Mevcut Değil[/bold red]"
-            mt.add_row(f"[{idx}]", rec_model, status + f" ({badge})")
+            colored_speed = SPEED_COLOR.get(speed, speed)
+            mt.add_row(f"[{idx}]", rec_model, status + f" ({badge}) " + colored_speed)
         
-        recommended_names = [name for name, _ in recommended_models]
+        recommended_names = [name for name, _, _ in recommended_models]
         non_rec_models = [m for m in available_models if not any(m.lower() == r.lower() for r in recommended_names)]
         
         for idx, model in enumerate(non_rec_models, start=len(recommended_models) + 1):

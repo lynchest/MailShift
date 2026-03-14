@@ -9,8 +9,8 @@ def setup_logger(name: str) -> logging.Logger:
     if not logger.handlers:
         logger.setLevel(logging.INFO)
         
-        # Console handler (for standard errors/debug)
-        c_handler = logging.StreamHandler(sys.stdout)
+        # Console handler: keep on stderr so Rich progress (stdout) is less likely to get visually corrupted.
+        c_handler = logging.StreamHandler(sys.stderr)
         c_handler.setLevel(logging.WARNING)  # Less verbose by default on console
         
         # File handler

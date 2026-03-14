@@ -55,3 +55,25 @@ def test_google_move_to_trash_uses_gmail_trash_folder_and_marks_deleted() -> Non
     conn.uid.assert_any_call("copy", "501", '"[Gmail]/Trash"')
     conn.uid.assert_any_call("store", "501", "+FLAGS", r"(\Deleted)")
     conn.expunge.assert_called_once()
+
+
+def test_google_move_to_trash_falls_back_when_hint_copy_returns_no() -> None:
+    engine = _make_gmail_engine()
+
+    conn = MagicMock()
+    conn.list.return_value = ("NO", [b"failed"])
+    conn.uid.side_effect = [
+        ("NO", [b"bad destination"]),
+        ("OK", [b"copied"]),
+        ("OK", [b"flagged"]),
+    ]
+    conn.expunge.return_value = ("OK", [b"expunged"])
+    engine._conn = conn
+
+    moved = engine.move_to_trash(["777"], trash_folder="Trash")
+
+    assert moved == ["777"]
+    conn.uid.assert_any_call("copy", "777", '"Trash"')
+    conn.uid.assert_any_call("copy", "777", '"[Gmail]/Trash"')
+    conn.uid.assert_any_call("store", "777", "+FLAGS", r"(\Deleted)")
+    conn.expunge.assert_called_once()

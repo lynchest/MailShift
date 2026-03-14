@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import sys
 import io
+import re
+import time
+import unicodedata
 from typing import Optional
 
 if sys.platform == "win32":
@@ -38,6 +41,7 @@ from rich.progress import (
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
+    TimeRemainingColumn,
 )
 from rich.prompt import Confirm, Prompt
 
@@ -86,15 +90,32 @@ from cli_utils import (
     prompt_provider,
 )
 
-# --- YENİ EKLENEN YARDIMCI FONKSİYON ---
 def clean_text(text: Optional[str], max_len: int = 35) -> str:
-    """Metin içindeki satır atlama (\n, \r) ve sekmeleri temizler, güvenli uzunluğa kırpar."""
+    """Normalize progress labels to avoid wrapped/duplicated-looking bars on narrow terminals."""
     if not text:
         return "(bilinmiyor)"
-    # .split() tüm boşluk ve satır sonu karakterlerini ayırır, " ".join() bunları tek boşlukla birleştirir.
-    cleaned = " ".join(text.split())
+
+    # Normalize accented forms and strip control/format characters that can break terminal rendering.
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = re.sub(r"[\x00-\x1f\x7f]", " ", normalized)
+    normalized = "".join(
+        ch for ch in normalized
+        if unicodedata.category(ch) not in {"Mn", "Me", "Cf", "Cs"}
+    )
+
+    cleaned = " ".join(normalized.split())
+    if not cleaned:
+        cleaned = "(bilinmiyor)"
     return cleaned[:max_len] + ("…" if len(cleaned) > max_len else "")
-# ---------------------------------------
+
+
+def format_duration(seconds: float) -> str:
+    """Format a duration in seconds as a short human-readable label."""
+    total = max(0, int(round(seconds)))
+    minutes, sec = divmod(total, 60)
+    if minutes:
+        return f"~{minutes} dk {sec:02d} sn"
+    return f"~{sec} sn"
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option("--provider", type=click.Choice(["gmail", "proton", "custom"]), default=None, help="Mail provider.")
@@ -264,6 +285,7 @@ def main(
                 BarColumn(), TaskProgressColumn(),
                 TextColumn("[dim]{task.fields[current]}[/dim]"),
                 TimeElapsedColumn(), console=console, transient=True,
+                redirect_stdout=True, redirect_stderr=True,
             ) as progress:
                 task = progress.add_task("fetch", total=len(missing_uids), current="Starting…")
 
@@ -272,7 +294,7 @@ def main(
                     # DÜZELTME: Satır sonu karakterlerinden arındırma
                     progress.update(
                         task, advance=1,
-                        current=clean_text(meta.sender)
+                        current=clean_text(meta.sender, max_len=24)
                     )
 
                 engine.fetch_headers_concurrent(missing_uids, progress_cb=_on_fetch)
@@ -288,6 +310,7 @@ def main(
                     BarColumn(), TaskProgressColumn(),
                     TextColumn("[dim]{task.fields[current]}[/dim]"),
                     TimeElapsedColumn(), console=console, transient=True,
+                    redirect_stdout=True, redirect_stderr=True,
                 ) as progress:
                     task = progress.add_task("body_fetch", total=len(need_body), current="Starting…")
 
@@ -295,7 +318,7 @@ def main(
                         # DÜZELTME: Satır sonu karakterlerinden arındırma
                         progress.update(
                             task, advance=1,
-                            current=clean_text(meta.sender)
+                            current=clean_text(meta.sender, max_len=24)
                         )
 
                     engine.fetch_body_for_cached_mails(need_body, progress_cb=_on_body)
@@ -317,16 +340,17 @@ def main(
                 SpinnerColumn(), TextColumn("[bold cyan]Phase 1 – Heuristic Scan[/bold cyan]"),
                 BarColumn(), TaskProgressColumn(),
                 TextColumn("[dim]{task.fields[current]}[/dim]"),
-                TimeElapsedColumn(), console=console, transient=True,
+                TimeElapsedColumn(), TimeRemainingColumn(), console=console, transient=True,
+                redirect_stdout=True, redirect_stderr=True,
             ) as progress:
                 task = progress.add_task("fast", total=len(mails), current="Starting…")
                 for mail in mails:
                     res = fast_analyze(mail)
                     fast_results.append(res)
-                    icon = "🗑" if res.decision == "SIL" else "✅"
+                    icon = "SIL" if res.decision == "SIL" else "TUT"
                     
                     # DÜZELTME: Satır sonu karakterlerinden arındırma
-                    subj = clean_text(mail.subject)
+                    subj = clean_text(mail.subject, max_len=24)
                     progress.update(task, advance=1, current=f"{icon} {subj}")
 
             sil_candidates = [r for r in fast_results if r.decision == "SIL"]
@@ -343,16 +367,25 @@ def main(
                 from pro_analyzer import pro_analyze
 
                 llm_verified: list[ScanResult] = []
+                max_workers = calculate_optimal_workers(selected_ollama_model, resolved_mode.value)
+                console.print(
+                    "[dim]Pro mode dinamik tahmin: ilk sonuçlardan sonra kalan süre "
+                    "otomatik hesaplanır.[/dim]"
+                )
+
                 with Progress(
                     SpinnerColumn(), TextColumn("[bold magenta]Phase 2 – LLM Verification[/bold magenta]"),
                     BarColumn(), TaskProgressColumn(),
                     TextColumn("[dim]{task.fields[current]}[/dim]"),
-                    TimeElapsedColumn(), console=console, transient=True,
+                    TimeElapsedColumn(), TimeRemainingColumn(), console=console, transient=True,
+                    redirect_stdout=True, redirect_stderr=True,
                 ) as progress:
                     task = progress.add_task("llm", total=len(sil_candidates), current="Starting…")
+                    phase2_start = time.perf_counter()
+                    phase2_done = 0
+                    phase2_total = len(sil_candidates)
 
                     from concurrent.futures import ThreadPoolExecutor, as_completed
-                    max_workers = calculate_optimal_workers(selected_ollama_model, resolved_mode.value)
 
                     def _llm_worker(idx_result):
                         idx, candidate = idx_result
@@ -368,11 +401,19 @@ def main(
                             try:
                                 idx, res = future.result()
                                 temp[idx] = res
-                                icon = "🗑" if res.decision == "SIL" else "✅"
+                                icon = "SIL" if res.decision == "SIL" else "TUT"
                                 
                                 # DÜZELTME: Satır sonu karakterlerinden arındırma
-                                subj = clean_text(res.mail.subject)
-                                progress.update(task, advance=1, current=f"{icon} {subj}")
+                                subj = clean_text(res.mail.subject, max_len=24)
+                                phase2_done += 1
+                                elapsed = max(0.001, time.perf_counter() - phase2_start)
+                                avg_per_item = elapsed / phase2_done
+                                remaining = max(0.0, (phase2_total - phase2_done) * avg_per_item)
+                                progress.update(
+                                    task,
+                                    advance=1,
+                                    current=f"{icon} {subj} | kalan {format_duration(remaining)}",
+                                )
                             except Exception as exc:
                                 i = futures[future]
                                 temp[i] = ScanResult(
@@ -380,7 +421,15 @@ def main(
                                     decision="TUT",
                                     reason=f"llm-error:{exc}",
                                 )
-                                progress.update(task, advance=1, current="⚠️ hata")
+                                phase2_done += 1
+                                elapsed = max(0.001, time.perf_counter() - phase2_start)
+                                avg_per_item = elapsed / phase2_done
+                                remaining = max(0.0, (phase2_total - phase2_done) * avg_per_item)
+                                progress.update(
+                                    task,
+                                    advance=1,
+                                    current=f"⚠️ hata | kalan {format_duration(remaining)}",
+                                )
 
                     llm_verified = [r for r in temp if r is not None]
 
@@ -413,15 +462,16 @@ def main(
                 SpinnerColumn(), TextColumn("[bold cyan]Analyzing[/bold cyan]"),
                 BarColumn(), TaskProgressColumn(), TextColumn("[dim]{task.fields[current]}[/dim]"),
                 TimeElapsedColumn(), console=console, transient=True,
+                redirect_stdout=True, redirect_stderr=True,
             ) as progress:
                 task = progress.add_task("analyze", total=len(mails), current="Starting…")
 
                 def _on_analyze(result: ScanResult) -> None:
                     scan_results.append(result)
-                    icon = "🗑" if result.decision == "SIL" else "✅"
+                    icon = "SIL" if result.decision == "SIL" else "TUT"
                     
                     # DÜZELTME: Satır sonu karakterlerinden arındırma
-                    subj = clean_text(result.mail.subject)
+                    subj = clean_text(result.mail.subject, max_len=24)
                     progress.update(task, advance=1, current=f"{icon} {subj}")
 
                 _, stats = engine.analyze(mails, progress_cb=_on_analyze)
@@ -482,6 +532,7 @@ def main(
                     SpinnerColumn(), TextColumn(f"[bold red]{action_label}[/bold red]"),
                     BarColumn(), TaskProgressColumn(), TimeElapsedColumn(),
                     console=console, transient=True,
+                    redirect_stdout=True, redirect_stderr=True,
                 ) as progress:
                     del_task = progress.add_task("action", total=len(delete_uids))
                     if choice == "1":
@@ -513,14 +564,9 @@ def main(
                     )
                 else:
                     action_done = "kalıcı olarak silindi" if choice == "1" else "çöp kutusuna taşındı"
-                    extra = (
-                        "[yellow]⚠  Mesajları kalıcı olarak kaldırmak için Çöp Kutusu'nu boşaltın.[/yellow]\n"
-                        if choice == "1" else ""
-                    )
                     console.print(
                         Panel(
                             f"[bold green]✓ {len(deleted)} mesaj {action_done}.[/bold green]\n"
-                            f"{extra}"
                             f"[dim]Log kaydedildi: {log_file}[/dim]",
                             title="[bold green]İşlem Tamamlandı[/bold green]",
                             border_style="green",

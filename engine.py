@@ -15,7 +15,7 @@ from typing import Callable, Optional
 from bs4 import BeautifulSoup
 
 from models import MailMeta, ScanResult, ScanStats
-from config import AppConfig, IMAPConfig, Mode, RateLimitConfig
+from config import AppConfig, IMAPConfig, Mode, Provider, RateLimitConfig
 from logger import log
 
 
@@ -565,34 +565,79 @@ class MailEngine:
         log.info(f"Deleted {len(deleted)} messages successfully")
         return deleted
 
-    def _resolve_trash_folder(self, hint: str) -> str:
-        """Find the actual trash folder by listing all IMAP folders."""
+    def _resolve_trash_folders(self, hint: str) -> list[str]:
+        """Return ordered trash folder candidates discovered via LIST + provider hints."""
+        candidates: list[str] = []
+        if hint:
+            candidates.append(hint.strip('"'))
+
         try:
             status, lines = self._conn.list('""', "*")  # type: ignore[union-attr]
-            if status != "OK":
-                return hint
-            for line in lines:
-                if not line:
-                    continue
-                text = line.decode() if isinstance(line, bytes) else line
-                m = re.search(r'"([^"]+)"\s*$|(\S+)\s*$', text)
-                if not m:
-                    continue
-                name = (m.group(1) or m.group(2)).strip('"')
-                lower_text = text.lower()
-                has_trash_flag = r"\trash" in lower_text
-                keywords = (
-                    "trash", "bin", "deleted",
-                    "çöp", "silinmiş", "papelera", "corbeille", "papierkorb",
-                )
-                has_keyword = any(k in name.lower() for k in keywords)
-                if has_trash_flag or has_keyword:
-                    log.debug(f"Resolved trash folder via LIST: {name}")
-                    return name
+            if status == "OK":
+                for line in lines:
+                    if not line:
+                        continue
+                    text = line.decode() if isinstance(line, bytes) else line
+                    m = re.search(r'"([^"]+)"\s*$|(\S+)\s*$', text)
+                    if not m:
+                        continue
+                    name = (m.group(1) or m.group(2)).strip('"')
+                    lower_text = text.lower()
+                    has_trash_flag = r"\trash" in lower_text
+                    keywords = (
+                        "trash",
+                        "bin",
+                        "deleted",
+                        "çöp",
+                        "silinmiş",
+                        "papelera",
+                        "corbeille",
+                        "papierkorb",
+                    )
+                    has_keyword = any(k in name.lower() for k in keywords)
+                    if has_trash_flag or has_keyword:
+                        candidates.append(name)
+            else:
+                log.warning(f"Trash folder LIST returned status={status}")
         except Exception as e:
             log.warning(f"Trash folder discovery failed: {e}")
-        log.warning(f"No trash folder found via LIST; falling back to: {hint}")
-        return hint
+
+        if self.cfg.provider == Provider.GMAIL:
+            candidates.extend(
+                [
+                    "[Gmail]/Trash",
+                    "[Google Mail]/Trash",
+                    "[Gmail]/Bin",
+                    "[Google Mail]/Bin",
+                    "Trash",
+                ]
+            )
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for folder in candidates:
+            clean_folder = folder.strip().strip('"')
+            if not clean_folder:
+                continue
+            key = clean_folder.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(clean_folder)
+
+        if not deduped:
+            deduped = ["Trash"]
+
+        if len(deduped) == 1 and deduped[0] == hint.strip('"'):
+            log.warning(f"No trash folder found via LIST; falling back to: {deduped[0]}")
+        else:
+            log.debug(f"Trash folder candidates: {deduped}")
+
+        return deduped
+
+    def _resolve_trash_folder(self, hint: str) -> str:
+        """Backward-compatible single-folder resolver."""
+        return self._resolve_trash_folders(hint)[0]
 
     def move_to_trash(
         self,
@@ -602,13 +647,12 @@ class MailEngine:
     ) -> list[str]:
         assert self._conn, "Not connected"
         rl = self._rl
-        folder = self._resolve_trash_folder(trash_folder)
-        quoted_folder = f'"{folder}"'
+        folders = self._resolve_trash_folders(trash_folder)
         moved: list[str] = []
         chunks = list(chunk_list(uids, rl.delete_chunk_size))
         total_chunks = len(chunks)
         log.info(
-            f"Moving {len(uids)} messages to trash folder: {folder} "
+            f"Moving {len(uids)} messages to trash folders {folders} "
             f"in {total_chunks} chunks"
         )
 
@@ -616,12 +660,24 @@ class MailEngine:
             uid_str = ",".join(chunk)
 
             def _copy(u=uid_str):
-                status, _ = self._conn.uid(  # type: ignore[union-attr]
-                    "copy", u, quoted_folder
-                )
-                if status != "OK":
-                    raise RuntimeError(f"COPY returned {status}")
-                self._conn.uid("store", u, "+FLAGS", r"(\Deleted)")  # type: ignore[union-attr]
+                last_status = "NO"
+                for folder in folders:
+                    status, _ = self._conn.uid(  # type: ignore[union-attr]
+                        "copy", u, f'"{folder}"'
+                    )
+                    if status == "OK":
+                        store_status, _ = self._conn.uid(  # type: ignore[union-attr]
+                            "store", u, "+FLAGS", r"(\Deleted)"
+                        )
+                        if store_status != "OK":
+                            raise RuntimeError(f"STORE returned {store_status}")
+                        return
+                    last_status = status
+                    log.warning(
+                        f"COPY returned {status} for trash folder '{folder}', "
+                        "trying next candidate"
+                    )
+                raise RuntimeError(f"COPY returned {last_status}")
 
             try:
                 _with_retry(

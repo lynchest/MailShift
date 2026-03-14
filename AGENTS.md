@@ -6,7 +6,7 @@
 - `dry_run=True` is the default. Actual deletion only happens with `--no-dry-run`. Never change this default.
 - On any LLM or analysis error, fall back to `"TUT"` — never `"SIL"`. Safety-first.
 - Emails with `has_attachment=True` must always return `"TUT"` (enforced in `fast_analyzer.py`). Do not remove this guard.
-- After making changes to the codebase, ensure that both `AGENTS.md` and `README.md` are updated to reflect the new state and conventions.
+- Only update `AGENTS.md` and `README.md` if the changes introduce new conventions, logic, or significant architectural shifts. Minor bugfixes or trivial cleanups do not require documentation updates.
 - `IMAPConfig.password` is a `SecretStr` (Pydantic). Access its value with `.get_secret_value()`, never direct attribute access.
 
 ## Validation before finishing
@@ -29,6 +29,8 @@ No other build or lint step is configured.
 - **Turkish case normalization**: `fast_analyzer._normalize()` replaces `İ` (U+0130) with `i` then lowercases before matching. Both `full_text` and `content_text` pass through this function, so all regex matches return lowercase tokens in `ScanResult.reason`.
 - **`analyzer.py`** is a re-export shim only. Do not add logic there.
 - **Console output**: Use `from ui import console` (Rich console) for any new terminal output. Do not use bare `print()` — stdout is wrapped for UTF-8 on Windows and `print()` bypasses Rich's rendering.
+- **Progress UI stability**: Keep per-item progress labels short/sanitized (single-line, no control chars) and prefer ASCII status tags (`SIL`/`TUT`) over emoji to avoid wrapped/duplicated-looking progress bars in narrow Windows terminals.
+- **Logger stream**: Keep the console logger on `sys.stderr` so Rich progress output on stdout is not visually disrupted by warning/error logs.
 - **No YAML**: The project uses JSON throughout. `requirements.txt` does not include pyyaml.
 
 ## Important locations

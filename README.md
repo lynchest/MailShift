@@ -2,6 +2,16 @@
 
 Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 
+## Screenshots
+
+### Welcome Screen
+
+![MailShift Welcome Screen](first.png)
+
+### Fast/Pro Mode and AI Model Selection
+
+![MailShift Fast/Pro Mode and AI Model Selection](second.png)
+
 ## Features
 
 - **Multi provider support**: Gmail (IMAP + App Password), Proton Mail (via Proton Bridge), and Custom IMAP servers
@@ -28,8 +38,11 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
     - Intel/AMD integrated GPU VRAM may be estimated from shared system RAM when dedicated VRAM is not exposed by the driver
 - **Cache support** – skip re-fetching headers on repeat scans
 - **Rich CLI UI** – progress bars, tables, colored output with Turkish/English
+    - Progress status labels are sanitized and shortened to stay single-line on narrow terminals (prevents duplicated-looking bars)
+    - Live progress uses ASCII status tags (`SIL`/`TUT`) for more stable rendering across Windows terminals
 - **Cleanup history** – view past deletion reports
 - **Logging** – detailed operation logs
+    - Console warnings/errors are written to stderr to reduce interference with live progress rendering
 
 ## Install
 
