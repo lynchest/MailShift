@@ -145,6 +145,7 @@ def format_duration(seconds: float) -> str:
 @click.option("--remove-blacklist", "remove_blacklist", default=None, help="Remove a keyword from the blacklist.")
 @click.option("--list-keywords", "list_keywords_flag", is_flag=True, help="List all whitelist and blacklist keywords.")
 @click.option("--export", "export_file", default=None, help="Export scan results to CSV or JSON file.")
+@click.option("--workers", "-w", type=int, default=None, help="Number of workers for parallel processing.")
 def main(
     provider: Optional[str], mode: Optional[str], username: Optional[str],
     password: Optional[str], host: Optional[str], port: Optional[int],
@@ -153,7 +154,7 @@ def main(
     uninstall: bool, history: bool, add_whitelist: Optional[str],
     remove_whitelist: Optional[str], add_blacklist: Optional[str],
     remove_blacklist: Optional[str], list_keywords_flag: bool,
-    export_file: Optional[str],
+    export_file: Optional[str], workers: Optional[int],
 ) -> None:
     """MailShift – privacy-first newsletter purger for Gmail and Proton Mail."""
     log.info("Starting MailShift CLI")
@@ -173,9 +174,12 @@ def main(
     # ---- resolve provider / mode (interactive if not provided) ----
     resolved_provider = Provider(provider) if provider else prompt_provider()
     if mode:
-        resolved_mode, selected_model, llm_backend = Mode(mode), ollama_model, "ollama"
+        resolved_mode, selected_model, llm_backend, manual_workers = Mode(mode), ollama_model, "ollama", workers
     else:
-        resolved_mode, selected_model, llm_backend = prompt_mode()
+        resolved_mode, selected_model, llm_backend, manual_workers = prompt_mode()
+        # Eğer CLI'dan workers atandıysa prompt'tan geleni ez (veya tam tersi, burada CLI öncelikli)
+        if workers is not None:
+            manual_workers = workers
 
     # ---- credentials ----
     if not username or not password:
@@ -210,12 +214,16 @@ def main(
         system_prompt=ollama_prompt if ollama_prompt else DEFAULT_SYSTEM_PROMPT,
     )
 
-    resolved_workers = calculate_optimal_workers(selected_ollama_model, resolved_mode.value)
+    resolved_workers = calculate_optimal_workers(
+        selected_ollama_model, 
+        resolved_mode.value, 
+        manual_workers=manual_workers
+    )
 
     cfg = AppConfig(
         provider=resolved_provider, mode=resolved_mode, imap=imap_cfg,
         ollama=ollama_cfg, lm_studio=lm_studio_cfg, llm_backend=llm_backend,
-        dry_run=dry_run, scan_limit=scan_limit,
+        dry_run=dry_run, scan_limit=scan_limit, max_workers=manual_workers,
     )
 
     clear_console()
@@ -234,7 +242,7 @@ def main(
             f"[bold]Provider:[/bold] {resolved_provider.value.capitalize()}\n"
             f"[bold]Mode:[/bold]     {model_display}\n"
             f"[bold]User:[/bold]     {username}\n"
-            f"[bold]Workers:[/bold]  {resolved_workers} [dim](auto)[/dim]\n"
+            f"[bold]Workers:[/bold]  {resolved_workers} {'[dim](auto)[/dim]' if manual_workers is None else '[yellow](manual)[/yellow]'}\n"
             f"{hardware_info}\n"
             f"[bold]Dry run:[/bold]  {'[yellow]Yes – no emails will be deleted[/yellow]' if dry_run else '[red]No – emails WILL be deleted[/red]'}",
             title="[bold blue]Configuration[/bold blue]",
@@ -314,6 +322,10 @@ def main(
         # ---- fetch new headers ----
         if missing_uids:
             console.print(f"[cyan]Suncudan [bold]{len(missing_uids)}[/bold] yeni ileti başlığı çekiliyor…[/cyan]")
+            console.print(
+                "[dim]Header fetch dinamik tahmin: ilk sonuçlardan sonra kalan süre "
+                "otomatik hesaplanır.[/dim]"
+            )
             with Progress(
                 SpinnerColumn(), TextColumn("[bold cyan]Fetching Headers[/bold cyan]"),
                 BarColumn(), TaskProgressColumn(),
@@ -322,13 +334,27 @@ def main(
                 redirect_stdout=True, redirect_stderr=True,
             ) as progress:
                 task = progress.add_task("fetch", total=len(missing_uids), current="Starting…")
+                fetch_start = time.perf_counter()
+                fetch_done = 0
+                fetch_total = len(missing_uids)
 
                 def _on_fetch(meta: MailMeta) -> None:
                     mails.append(meta)  # append new mail to our total list
                     # DÜZELTME: Satır sonu karakterlerinden arındırma
+                    nonlocal fetch_done
+                    fetch_done += 1
+                    sender = clean_text(meta.sender, max_len=20)
+                    if fetch_done >= 3:
+                        elapsed = max(0.001, time.perf_counter() - fetch_start)
+                        avg_per_item = elapsed / fetch_done
+                        remaining = max(0.0, (fetch_total - fetch_done) * avg_per_item)
+                        current_label = f"{sender} | kalan {format_duration(remaining)}"
+                    else:
+                        current_label = f"{sender} | kalan hesaplanıyor"
+
                     progress.update(
                         task, advance=1,
-                        current=clean_text(meta.sender, max_len=24)
+                        current=current_label
                     )
 
                 engine.fetch_headers_concurrent(missing_uids, progress_cb=_on_fetch)
@@ -401,7 +427,11 @@ def main(
                 from pro_analyzer import pro_analyze
 
                 llm_verified: list[ScanResult] = []
-                max_workers = calculate_optimal_workers(selected_ollama_model, resolved_mode.value)
+                max_workers = calculate_optimal_workers(
+                    selected_ollama_model, 
+                    resolved_mode.value, 
+                    manual_workers=cfg.max_workers
+                )
                 console.print(
                     "[dim]Pro mode dinamik tahmin: ilk sonuçlardan sonra kalan süre "
                     "otomatik hesaplanır.[/dim]"

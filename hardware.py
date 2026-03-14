@@ -218,7 +218,12 @@ def get_vram_requirement(model_size_b: float) -> float:
     return 0.60
 
 
-def calculate_optimal_workers(model_name: str, mode: str = "pro", system_info: Optional[SystemInfo] = None) -> int:
+def calculate_optimal_workers(
+    model_name: str, 
+    mode: str = "pro", 
+    system_info: Optional[SystemInfo] = None,
+    manual_workers: Optional[int] = None
+) -> int:
     system_info = system_info or get_system_info()
     model_size = detect_model_size(model_name)
 
@@ -228,6 +233,13 @@ def calculate_optimal_workers(model_name: str, mode: str = "pro", system_info: O
             # 0.5 GB güvenlik payı bırakıldı
             safe_vram = system_info.vram_available_gb - 0.5 
             max_by_vram = max(1, int(safe_vram / overhead))
+
+            if manual_workers is not None and manual_workers > 0:
+                # Kullanıcı manuel atarsa, VRAM yetiyorsa izin ver, yetmiyorsa uyar/sınırla
+                if manual_workers > max_by_vram:
+                    # Log or warning could be here, but for now we follow safety
+                    return max_by_vram
+                return manual_workers
 
             # Hız (TPS) odaklı GPU işlem limiti (Compute-Bound)
             if system_info.vram_total_gb >= 12.0:
@@ -244,10 +256,15 @@ def calculate_optimal_workers(model_name: str, mode: str = "pro", system_info: O
             return min(max_by_vram, ceiling)
             
         # CPU Modu
+        if manual_workers is not None and manual_workers > 0:
+            return manual_workers
+
         ram_per_worker = max(1.0, model_size * 1.5)
         max_by_ram = int(system_info.available_ram_gb / ram_per_worker)
         return max(1, min(max_by_ram, system_info.cpu_count // 2, 4))
         
+    if manual_workers is not None and manual_workers > 0:
+        return manual_workers
     return max(1, min(system_info.cpu_count, 16))
 
 

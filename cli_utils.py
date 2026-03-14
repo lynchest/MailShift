@@ -437,7 +437,7 @@ def prompt_llm_backend() -> str:
     return "ollama" if choice == "1" else "lm_studio"
 
 
-def _prompt_lm_studio_flow() -> tuple[Mode, str, str]:
+def _prompt_lm_studio_flow() -> tuple[Mode, str, str, Optional[int]]:
     """Handle LM Studio model selection for Pro mode."""
     available_models = get_lm_studio_models()
 
@@ -458,7 +458,7 @@ def _prompt_lm_studio_flow() -> tuple[Mode, str, str]:
 
         if not available_models:
             console.print("[red]Hâlâ model alınamıyor. Fast moduna geçiliyor.[/red]")
-            return Mode.FAST, "qwen3.5:2B", "ollama"
+            return Mode.FAST, "qwen3.5:2B", "ollama", None
 
     mt = Table(box=None, show_header=False, padding=(0, 2))
     mt.add_column(style="bold yellow", width=4)
@@ -470,11 +470,20 @@ def _prompt_lm_studio_flow() -> tuple[Mode, str, str]:
     choices = [str(i) for i in range(1, len(available_models) + 1)]
     model_choice = Prompt.ask("[bold]Model[/bold]", choices=choices, default="1")
     selected_model = available_models[int(model_choice) - 1]
-    return Mode.PRO, selected_model, "lm_studio"
+    
+    # Worker sayısını sor (LM Studio için de ortak)
+    worker_input = Prompt.ask(
+        "\n[bold cyan]Paralel işlemci (worker) sayısı[/bold cyan]\n"
+        "[dim](Boş bırakılırsa sisteminiz için en uygun değer otomatik hesaplanır)[/dim]",
+        default=""
+    ).strip()
+    manual_workers = int(worker_input) if worker_input.isdigit() and int(worker_input) > 0 else None
+    
+    return Mode.PRO, selected_model, "lm_studio", manual_workers
 
 
-def prompt_mode() -> tuple[Mode, str, str]:
-    """Returns (mode, model_name, llm_backend)."""
+def prompt_mode() -> tuple[Mode, str, str, Optional[int]]:
+    """Returns (mode, model_name, llm_backend, manual_workers)."""
     t = Table(box=None, show_header=False, padding=(0, 2))
     t.add_column(style="bold yellow", width=4)
     t.add_column(style="bold", width=6)
@@ -612,9 +621,18 @@ def prompt_mode() -> tuple[Mode, str, str]:
                 console.print("[yellow]Model hazır olmadığı için Fast moduna geçiliyor.[/yellow]")
                 return Mode.FAST, "qwen3.5:2B", llm_backend
 
-        return mode, model, llm_backend
+        # Worker sayısını sor (opsiyonel)
+        worker_input = Prompt.ask(
+            "\n[bold cyan]Paralel işlemci (worker) sayısı[/bold cyan]\n"
+            "[dim](Boş bırakılırsa sisteminiz için en uygun değer otomatik hesaplanır)[/dim]",
+            default=""
+        ).strip()
+        
+        manual_workers = int(worker_input) if worker_input.isdigit() and int(worker_input) > 0 else None
 
-    return mode, "qwen3.5:2B", "ollama"
+        return mode, model, llm_backend, manual_workers
+
+    return mode, "qwen3.5:2B", "ollama", None
 
 
 def prompt_credentials(

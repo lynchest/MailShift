@@ -225,6 +225,7 @@ class AppConfig(BaseModel):
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     dry_run: bool = True
     scan_limit: Optional[int] = None  # None → scan all messages
+    max_workers: Optional[int] = None # Manually specify workers
 
 
 def build_imap_config(

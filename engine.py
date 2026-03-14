@@ -454,9 +454,13 @@ class MailEngine:
         need_llm = self.cfg.mode == Mode.PRO
 
         max_workers = (
-            calculate_optimal_workers(self.cfg.ollama.model, self.cfg.mode.value)
+            calculate_optimal_workers(
+                self.cfg.ollama.model,
+                self.cfg.mode.value,
+                manual_workers=self.cfg.max_workers
+            )
             if need_llm
-            else max(1, __import__("os").cpu_count() or 4)
+            else (self.cfg.max_workers or max(1, __import__("os").cpu_count() or 4))
         )
         log.info(
             f"analyze(): {len(mails)} mails, {max_workers} workers, "
