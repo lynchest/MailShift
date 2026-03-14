@@ -8,12 +8,14 @@ so it is not re-created for every single email.
 
 import re
 import json
+import os
 import unicodedata
 from typing import Optional
 
 import requests
 
 from config import OllamaConfig
+from hardware import detect_model_size, get_system_info
 from models import MailMeta, ScanResult
 from abc import ABC, abstractmethod
 from logger import log
@@ -22,12 +24,74 @@ from logger import log
 _session: Optional[requests.Session] = None
 
 
+def _parse_bool_env(value: str) -> Optional[bool]:
+    lowered = (value or "").strip().lower()
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _select_ollama_runtime_options(model_name: str) -> dict[str, int | float | bool]:
+    """Pick Ollama runtime options based on current machine capabilities."""
+    options: dict[str, int | float | bool] = {
+        "num_predict": 256,
+        "temperature": 0.0,
+        "num_thread": 6,
+        "num_gpu": 32,
+        "use_flash_attn": True,
+    }
+
+    try:
+        system_info = get_system_info()
+        model_size_b = detect_model_size(model_name)
+
+        cpu_threads = max(2, min(12, max(1, system_info.cpu_count - 1)))
+        options["num_thread"] = cpu_threads
+
+        if system_info.has_gpu and system_info.vram_available_gb > 0.5:
+            estimated_model_vram = max(1.0, model_size_b * 0.9)
+            fit_ratio = system_info.vram_available_gb / estimated_model_vram
+
+            if fit_ratio >= 1.5:
+                options["num_gpu"] = 32
+            elif fit_ratio >= 1.0:
+                options["num_gpu"] = 24
+            elif fit_ratio >= 0.6:
+                options["num_gpu"] = 16
+            else:
+                options["num_gpu"] = 8
+
+            gpu_name = (system_info.gpu_name or "").lower()
+            options["use_flash_attn"] = any(token in gpu_name for token in ("nvidia", "rtx", "gtx", "apple"))
+            options["num_thread"] = max(2, min(int(options["num_thread"]), 8))
+        else:
+            options["num_gpu"] = 0
+            options["use_flash_attn"] = False
+    except Exception as exc:
+        log.warning(f"Hardware-based Ollama tuning failed, defaults will be used: {exc}")
+
+    env_num_thread = os.getenv("MAILSHIFT_OLLAMA_NUM_THREAD", "").strip()
+    if env_num_thread.isdigit() and int(env_num_thread) > 0:
+        options["num_thread"] = int(env_num_thread)
+
+    env_num_gpu = os.getenv("MAILSHIFT_OLLAMA_NUM_GPU", "").strip()
+    if env_num_gpu.isdigit() and int(env_num_gpu) >= 0:
+        options["num_gpu"] = int(env_num_gpu)
+
+    env_flash = _parse_bool_env(os.getenv("MAILSHIFT_OLLAMA_USE_FLASH_ATTN", ""))
+    if env_flash is not None:
+        options["use_flash_attn"] = env_flash
+
+    return options
+
+
 def _get_session() -> requests.Session:
     """Return (or lazily create) a module-level requests.Session."""
     global _session
     if _session is None:
         _session = requests.Session()
-        # Allow up to 32 concurrent connections to the same Ollama host
         adapter = requests.adapters.HTTPAdapter(
             pool_connections=1,
             pool_maxsize=32,
@@ -44,28 +108,22 @@ def _get_session() -> requests.Session:
 # ── Ollama health check ──────────────────────────────────────────────────
 
 def check_ollama_health(base_url: str = "http://localhost:11434", model: str = "") -> tuple[bool, str]:
-    """
-    Verify that Ollama is reachable and (optionally) the requested model
-    is available.
-
-    Returns ``(ok, message)`` – *ok* is ``True`` when Ollama is ready.
-    """
     try:
         resp = _get_session().get(f"{base_url}/api/tags", timeout=5)
         resp.raise_for_status()
     except requests.ConnectionError:
-        return False, "Ollama'ya bağlanılamıyor. Ollama'nın çalıştığından emin olun (tamamen kapatmanız için görev yöneticisine bakmalısınız)."
+        return False, "Ollama'ya bağlanılamıyor. Ollama'nın çalıştığından emin olun."
     except Exception as exc:
         return False, f"Ollama bağlantı hatası: {exc}"
 
     if not model:
-        return True, "Ollama çalışıyor (tamamen kapatmanız için görev yöneticisine bakmalısınız)."
+        return True, "Ollama çalışıyor."
 
     available = [m["name"] for m in resp.json().get("models", [])]
     available_lower = [m.lower() for m in available]
     model_lower = model.lower()
     if any(model_lower in m or m in model_lower for m in available_lower):
-        return True, f"Ollama çalışıyor, model '{model}' mevcut (tamamen kapatmanız için görev yöneticisine bakmalısınız)."
+        return True, f"Ollama çalışıyor, model '{model}' mevcut."
 
     return False, (
         f"Ollama çalışıyor fakat '{model}' modeli bulunamadı.\n"
@@ -89,7 +147,18 @@ class LLMProvider(ABC):
         if not response:
             return ("TUT", "invalid-response")
 
-        # Some small models return JSON despite prompt wording; accept that first.
+        # 1. Try direct JSON parsing first (Structured Outputs)
+        try:
+            parsed = json.loads(response)
+            if isinstance(parsed, dict) and "decision" in parsed:
+                decision = str(parsed["decision"]).upper()
+                if decision in {"SIL", "TUT"}:
+                    reason = str(parsed.get("reason", "no reason provided"))
+                    return (decision, reason)
+        except json.JSONDecodeError:
+            pass # Fallback to manual extraction
+
+        # 2. Fallback to extracting from pseudo-JSON or plain text
         decision = self._extract_decision_from_json(response)
         if decision is None:
             normalized = self._normalize_for_decision_parse(response)
@@ -112,7 +181,7 @@ class LLMProvider(ABC):
         for candidate in candidates:
             try:
                 parsed = json.loads(candidate)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
 
             values_to_check: list[str] = []
@@ -142,7 +211,11 @@ class LLMProvider(ABC):
 
     def _extract_reason(self, response: str, decision: str) -> str:
         response_lower = response.lower()
+        # Added Turkish keywords as well
         patterns = [
+            r'çünkü\s+(.+?)(?:\.|$)',
+            r'nedeni[:\s]\s*(.+?)(?:\.|$)',
+            r'sebebi[:\s]\s*(.+?)(?:\.|$)',
             r'because\s+(.+?)(?:\.|$)',
             r'since\s+(.+?)(?:\.|$)',
             r'reason:\s*(.+?)(?:\.|$)',
@@ -153,105 +226,11 @@ class LLMProvider(ABC):
             match = re.search(pattern, response_lower)
             if match:
                 reason = match.group(1).strip()
-                if 3 < len(reason) < 50:
+                if 3 < len(reason) < 150: # Slightly increased max reason length
                     return reason
         if decision == "SIL":
             return "newsletter/spam"
         return "personal/important"
-
-    @staticmethod
-    def _normalize_text(text: str) -> str:
-        lowered = (text or "").lower().replace("ı", "i")
-        decomposed = unicodedata.normalize("NFKD", lowered)
-        stripped = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
-        return re.sub(r"\s+", " ", stripped).strip()
-
-    def _apply_policy_overrides(self, meta: MailMeta, decision: str, reason: str) -> tuple[str, str]:
-        """Apply deterministic safety/policy rules to reduce small-model drift."""
-        sender = self._normalize_text(meta.sender)
-        subject = self._normalize_text(meta.subject)
-        body = self._normalize_text(meta.body_preview)
-        text = f"{subject} {body}"
-
-        if "drive-shares-noreply@google.com" in sender and "yeni belge paylasildi" in subject:
-            return ("TUT", "policy:trusted-drive-share")
-
-        if "weekly tech digest" in subject:
-            return ("SIL", "policy:newsletter-digest")
-
-        if "@x.com" in sender and ("yeni takipci" in subject or "new follower" in subject):
-            return ("SIL", "policy:x-new-follower")
-
-        if "@x.com" in sender and ("mention" in subject or "etiketledi" in subject):
-            return ("TUT", "policy:x-mention")
-
-        if "@coursera.org" in sender and ("odev" in text or "sertifika" in text or "certificate" in text):
-            return ("TUT", "policy:coursera-learning")
-
-        if "reddit" in sender and ("populer konu" in text or "upvote" in text or "yorum" in text):
-            return ("TUT", "policy:reddit-community")
-
-        if "linkedin.com" in sender and ("yeni is firsati" in text or "new job" in text or "job" in text):
-            return ("TUT", "policy:linkedin-job-notice")
-
-        if ("basvurunuz degerlendirildi" in subject or "application reviewed" in subject) and (
-            "kariyer@" in sender or "@linkedin.com" in sender or "@company" in sender
-        ):
-            return ("TUT", "policy:job-application-update")
-
-        if "@patreon.com" in sender and ("yeni icerik" in text or "exclusive video" in text or "new post" in text):
-            return ("TUT", "policy:patreon-subscribed-content")
-
-        if "@spotify.com" in sender and "wrapped" in subject:
-            return ("TUT", "policy:spotify-wrapped")
-
-        if "@udemy.com" in sender and ("yeni kurs onerisi" in text or "recommendation" in text):
-            return ("SIL", "policy:udemy-course-promo")
-
-        if "@netflix.com" in sender and ("yeni dizi onerisi" in text or "new show" in text or "onerisi" in text):
-            return ("SIL", "policy:netflix-content-reco")
-
-        if "instagram.com" in sender and ("yeni hikaye" in text or "story" in text):
-            return ("SIL", "policy:instagram-story-ping")
-
-        if "@discord.com" in sender and "sunucuda yeni etkinlik" in subject:
-            return ("TUT", "policy:discord-server-event")
-
-        if "ziraatbank.com.tr" in sender and ("islem onayi" in text or "dogrulama kodu" in text):
-            return ("TUT", "policy:trusted-bank-security")
-
-        if "@youtube.com" in sender and "youtube premium" in subject and ("deneme" in text or "trial" in text):
-            return ("TUT", "policy:youtube-premium-lifecycle")
-
-        if "@microsoft.com" in sender and ("depolama" in text or "lisans" in text or "storage" in text or "license" in text):
-            return ("TUT", "policy:microsoft-lifecycle")
-
-        if "@disneyplus.com" in sender and ("odeme yontem" in text or "payment method" in text):
-            return ("TUT", "policy:disneyplus-billing")
-
-        if "elektrik faturasi" in subject and "fatura@" in sender:
-            return ("TUT", "policy:utility-bill")
-
-        if re.search(r"tebrikler.*(cek|nakit).*kazan", text):
-            return ("SIL", "policy:prize-phishing")
-
-        if "arkadasin seni bekliyor" in text and re.search(r"\b\d+\s*tl\b", text):
-            return ("SIL", "policy:referral-cash-promo")
-
-        if "dogum gunu hediyesi" in text and ("indirim" in text or "indirim kodu" in text):
-            return ("SIL", "policy:birthday-discount-promo")
-
-        if ("hesabiniz askiya alindi" in text or "hesabiniz askiya alindi" in text) and (
-            "-verify." in sender or "-tr.net" in sender or "-secure." in sender
-        ):
-            return ("SIL", "policy:spoofed-account-suspension")
-
-        if "hesabiniz" in text and ("kapatilacak" in text or "silinecek" in text) and (
-            "-verify." in sender or "-tr.net" in sender or "-secure." in sender
-        ):
-            return ("SIL", "policy:spoofed-account-closure")
-
-        return (decision, reason)
 
 
 class OllamaProvider(LLMProvider):
@@ -259,6 +238,7 @@ class OllamaProvider(LLMProvider):
 
     def __init__(self, cfg: OllamaConfig):
         self.cfg = cfg
+        self.runtime_options = _select_ollama_runtime_options(cfg.model)
 
     @staticmethod
     def _build_user_prompt(meta: MailMeta, max_body_chars: int) -> str:
@@ -289,8 +269,7 @@ class OllamaProvider(LLMProvider):
                 "required": ["decision"],
             },
             "options": {
-                "num_predict": 256,
-                "temperature": 0.0
+                **self.runtime_options,
             }
         }
         try:
@@ -309,24 +288,20 @@ class OllamaProvider(LLMProvider):
                 raw_response = str(body.get("response", "")).strip()
 
             decision, reason = self._parse_llm_response(raw_response)
-            decision, reason = self._apply_policy_overrides(meta, decision, reason)
-
             return ScanResult(mail=meta, decision=decision, reason=f"llm:{decision} - {reason}")
+            
         except Exception as exc:
             log.warning(f"Ollama API error: {exc}")
             return ScanResult(mail=meta, decision="TUT", reason=f"llm-error:{exc}")
 
 
-# ── Cached provider instance ─────────────────────────────────────────────
+# ── Cached provider instance & Main Entry ────────────────────────────────
 _provider_cache: dict[str, OllamaProvider] = {}
 
 
 def pro_analyze(meta: MailMeta, ollama_cfg: OllamaConfig) -> ScanResult:
-    """Analyze a single email via Ollama (cached provider instance)."""
+    """Analyze a single email via cached Ollama provider."""
     cache_key = f"{ollama_cfg.base_url}|{ollama_cfg.model}"
     if cache_key not in _provider_cache:
         _provider_cache[cache_key] = OllamaProvider(ollama_cfg)
     return _provider_cache[cache_key].analyze(meta)
-
-
-

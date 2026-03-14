@@ -127,3 +127,18 @@ def test_fast_analyze_turkish_dotted_i_normalized():
     result = fast_analyzer.fast_analyze(meta)
     assert result.decision == "SIL"
     assert result.reason.startswith("heuristic:")
+
+
+@patch("fast_analyzer.WHITELIST_PATTERN", None)
+@patch("fast_analyzer.JUNK_PATTERN", re.compile("offer|discount", re.IGNORECASE))
+def test_fast_analyze_phishing_is_kept():
+    """Phishing keywords in _ALWAYS_KEEP_PATTERN should return TUT to avoid false positives."""
+    meta = MailMeta(
+        uid="106",
+        subject="URGENT: Verify your identity",
+        sender="security@trustme.com",
+        body_preview="Your account is suspended. Click here to verify.",
+    )
+    result = fast_analyzer.fast_analyze(meta)
+    assert result.decision == "TUT"
+    assert result.reason.startswith("safe-guard:")

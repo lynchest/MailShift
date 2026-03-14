@@ -24,6 +24,12 @@ _ALWAYS_KEEP_PATTERN = re.compile(
         |
         # Google Drive / cloud storage quota fullness notices
         (google\s*drive|gdrive|onedrive|icloud|drive)\b.{0,120}(dol[uı]|dolmak\s+[üu]zere|storage|depolama|quota|space\s+(?:is\s+)?(?:almost\s+)?full|kota)
+        |
+        # Phishing heuristics (force TUT to avoid SILing real mails by mistake)
+        \b(urgent|account\s+suspended|verify\s+your\s+identity|tebrikler.{0,30}kazand[ıi]n[ıi]z|çekiliş|şifre(nizi)?\s+sıfırlayın|kart\s+bilgileri(nizi)?\s+güncelleyin)\b
+        |
+        # Award/Gift only if it looks like a winning notice (phishing risk)
+        \b(ödül|hediye).{0,20}(kazand[ıi]n[ıi]z|hesab[ıi]n[ıi]za\s+tan[ıi]mland[ıi])\b
     )
     """,
     re.IGNORECASE | re.VERBOSE,

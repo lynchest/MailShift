@@ -377,7 +377,7 @@ def main(
                     SpinnerColumn(), TextColumn("[bold magenta]Phase 2 – LLM Verification[/bold magenta]"),
                     BarColumn(), TaskProgressColumn(),
                     TextColumn("[dim]{task.fields[current]}[/dim]"),
-                    TimeElapsedColumn(), TimeRemainingColumn(), console=console, transient=True,
+                    console=console, transient=True,
                     redirect_stdout=True, redirect_stderr=True,
                 ) as progress:
                     task = progress.add_task("llm", total=len(sil_candidates), current="Starting…")

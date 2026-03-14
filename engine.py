@@ -232,10 +232,12 @@ class MailEngine:
     def _recover_connection(self, exc: Exception, label: str, attempt: int) -> None:
         if not self._is_connection_error(exc):
             return
+        self._force_reconnect(label, attempt)
 
+    def _force_reconnect(self, label: str, attempt: int) -> None:
+        """Reconnect unconditionally — used when the server returns an unexpected NO."""
         log.warning(
-            f"Connection issue during '{label}' (attempt {attempt}); "
-            f"trying IMAP reconnect"
+            f"Forcing IMAP reconnect during '{label}' (attempt {attempt})"
         )
 
         old_conn = self._conn
@@ -673,7 +675,7 @@ class MailEngine:
                             raise RuntimeError(f"STORE returned {store_status}")
                         return
                     last_status = status
-                    log.warning(
+                    log.debug(
                         f"COPY returned {status} for trash folder '{folder}', "
                         "trying next candidate"
                     )
@@ -686,7 +688,7 @@ class MailEngine:
                     label=f"trash chunk {chunk_idx}/{total_chunks}",
                     on_error=lambda exc, attempt, lbl=(
                         f"trash chunk {chunk_idx}/{total_chunks}"
-                    ): self._recover_connection(exc, lbl, attempt),
+                    ): self._force_reconnect(lbl, attempt),
                 )
                 moved.extend(chunk)
                 if progress_cb:

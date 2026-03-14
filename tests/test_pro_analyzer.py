@@ -1,10 +1,11 @@
 import pytest
 import requests
 from unittest.mock import patch, MagicMock
+from hardware import SystemInfo
 
 import pro_analyzer
 from models import MailMeta
-from config import OllamaConfig
+from config import OllamaConfig, DEFAULT_SYSTEM_PROMPT
 
 
 def test_check_ollama_health_success():
@@ -95,3 +96,104 @@ def test_parse_llm_response_handles_json_decision():
 
     assert decision == "SIL"
     assert isinstance(reason, str)
+
+
+def test_select_ollama_runtime_options_cpu_only(monkeypatch):
+    cpu_only = SystemInfo(
+        cpu_count=16,
+        total_ram_gb=32.0,
+        available_ram_gb=20.0,
+        has_gpu=False,
+        gpu_name="None",
+        vram_total_gb=0.0,
+        vram_available_gb=0.0,
+        gpu_driver="None",
+    )
+    monkeypatch.setattr(pro_analyzer, "get_system_info", lambda: cpu_only)
+    monkeypatch.setattr(pro_analyzer, "detect_model_size", lambda _model: 2.0)
+
+    options = pro_analyzer._select_ollama_runtime_options("qwen3.5:2B")
+
+    assert options["num_gpu"] == 0
+    assert options["use_flash_attn"] is False
+    assert options["num_thread"] == 12
+
+
+def test_select_ollama_runtime_options_gpu(monkeypatch):
+    gpu_system = SystemInfo(
+        cpu_count=12,
+        total_ram_gb=32.0,
+        available_ram_gb=16.0,
+        has_gpu=True,
+        gpu_name="NVIDIA RTX 4070",
+        vram_total_gb=12.0,
+        vram_available_gb=9.0,
+        gpu_driver="555.85",
+    )
+    monkeypatch.setattr(pro_analyzer, "get_system_info", lambda: gpu_system)
+    monkeypatch.setattr(pro_analyzer, "detect_model_size", lambda _model: 4.0)
+
+    options = pro_analyzer._select_ollama_runtime_options("qwen3.5:4B")
+
+    assert options["num_gpu"] == 32
+    assert options["use_flash_attn"] is True
+    assert options["num_thread"] == 8
+
+
+def test_ollama_provider_uses_dynamic_runtime_options():
+    cfg = OllamaConfig(model="test_model", base_url="http://test")
+    expected_options = {
+        "num_predict": 256,
+        "temperature": 0.0,
+        "num_thread": 6,
+        "num_gpu": 32,
+        "use_flash_attn": True,
+    }
+
+    with patch("pro_analyzer._select_ollama_runtime_options", return_value=expected_options):
+        provider = pro_analyzer.OllamaProvider(cfg)
+
+    meta = MailMeta(uid="1", subject="Buy now", sender="test@test.com", body_preview="Sale sale sale")
+
+    with patch("pro_analyzer._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"message": {"content": "{\"decision\":\"SIL\"}"}}
+        mock_session.post.return_value = mock_resp
+
+        provider.analyze(meta)
+
+        sent_payload = mock_session.post.call_args.kwargs["json"]
+        assert sent_payload["options"] == expected_options
+
+
+def test_pro_analyze_always_routes_to_provider_even_for_known_patterns():
+    pro_analyzer._provider_cache.clear()
+    cfg = OllamaConfig(model="foo", base_url="http://bar")
+    meta = MailMeta(
+        uid="1",
+        subject="Kickstarter: Projeniz desteklendi - yeni guncelleme",
+        sender="no-reply@kickstarter.com",
+        body_preview="Retro klavye projesine yeni destekci geldi.",
+    )
+
+    with patch.object(pro_analyzer.OllamaProvider, "analyze") as mock_analyze:
+        mock_analyze.return_value = "mock_result"
+        result = pro_analyzer.pro_analyze(meta, cfg)
+
+    assert result == "mock_result"
+    mock_analyze.assert_called_once()
+
+
+def test_default_prompt_contains_migrated_policy_guidance_examples():
+    expected_phrases = [
+        "Kickstarter desteklenen proje güncellemeleri",
+        "OnlyFans abonelik kaynaklı içerik/mesaj bildirimleri",
+        "Emlakjet favori ilan/fiyat indirimi güncellemeleri",
+        "Yapı Kredi gibi güvenilir banka alan adından gelen harcama doğrulama",
+        "Belediye kaynaklı Ramazan/iftar program duyuruları",
+    ]
+
+    for phrase in expected_phrases:
+        assert phrase in DEFAULT_SYSTEM_PROMPT

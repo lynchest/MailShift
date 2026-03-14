@@ -8,7 +8,7 @@ from models import MailMeta
 from config import OllamaConfig
 from pro_analyzer import pro_analyze, check_ollama_health
 
-NUM_WORKERS = 4
+NUM_WORKERS = 6
 
 def _evaluate_item(item, cfg):
     meta = MailMeta(
