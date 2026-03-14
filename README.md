@@ -184,6 +184,19 @@ Run Proton Bridge locally, then connect with bridge credentials.
   - **Power User Tip**: Set the `OLLAMA_NUM_PARALLEL` environment variable to increase concurrent workers (default is 4).
   - **Note**: To close Ollama completely on Windows, you must use the Task Manager as it often runs without a visible window or system tray icon.
 
+## Ollama Kurulduktan Sonra Ne Yapmalıyım?
+
+Pro mode seçiminde Ollama yüklü değilse MailShift otomatik kurulum önerebilir. Kurulum bittiğinde Pro mode'a devam edebilmek için şu adımları izleyin:
+
+1. Terminali kapatıp yeniden açın (PATH güncellemesi için).
+2. Ollama servisini başlatın: `ollama serve`
+3. MailShift'i yeniden çalıştırıp Pro mode seçin.
+4. Model seçim ekranında eksik önerilen model otomatik indirilir (manuel `ollama pull` gerekmez).
+
+Not: Uygulama bu adımları ayrıca panel olarak da gösterir ve otomatik başlatma denemesi yapar. Otomatik başlatma başarısız olursa Fast mode'a güvenli şekilde geri döner.
+
+Not: Önerilen modeller listesine `qwen3.5:0.8B` eklidir ve seçim ekranında `%95 Accurate` etiketiyle gösterilir.
+
 ## Tests
 
 - Run all tests with: `py -3.14 -m pytest tests/`

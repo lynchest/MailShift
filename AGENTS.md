@@ -54,3 +54,5 @@ No other build or lint step is configured.
 - `pro_analyzer.py` sends `think: false` and a higher `num_predict` budget for `qwen3.5:2B/4B` so the model does not spend output tokens on hidden reasoning and leave `message.content` empty.
 - **Ollama Visibility**: Ollama on Windows often runs without a visible window or system tray icon. To completely terminate it, users must use the Task Manager.
 - Intel/AMD GPU detection in MailShift is for worker sizing and UI reporting only; actual model offload still depends on Ollama runtime/backend support and drivers.
+- **Post-install UX**: When Ollama is newly installed from interactive Pro-mode flow, MailShift prints a "next steps" panel (restart terminal, `ollama serve`, rerun Pro mode). Keep this guidance visible on fallback-to-fast paths and do not require manual `ollama pull` there.
+- **Model selection UX**: Recommended model list includes `qwen3.5:0.8B` with `%95 Accurate` label, and missing recommended models are auto-downloaded/verified from the selection screen.

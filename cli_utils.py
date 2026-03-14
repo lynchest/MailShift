@@ -144,6 +144,33 @@ def check_ollama_installed() -> bool:
     return shutil.which("ollama") is not None
 
 
+def show_ollama_next_steps(reason: str = "") -> None:
+    """Show clear next actions after Ollama install/startup issues."""
+    command_examples = (
+        "[bold]1)[/bold] Terminali kapatıp yeniden açın (PATH güncellemesi için).\n"
+        "[bold]2)[/bold] Ollama servis: [cyan]ollama serve[/cyan]\n"
+        "[bold]3)[/bold] MailShift'i tekrar çalıştırın ve Pro mode seçin.\n"
+        "[bold]4)[/bold] Model seçim ekranında eksik model [cyan]otomatik indirilir[/cyan]."
+    )
+
+    extra = ""
+    if reason:
+        extra = f"[yellow]{reason}[/yellow]\n\n"
+
+    console.print(
+        Panel(
+            f"{extra}"
+            "[bold cyan]Sonraki adımlar:[/bold cyan]\n"
+            f"{command_examples}\n\n"
+            "[dim]Not: Windows'ta Ollama bazen görünür pencere olmadan çalışır. "
+            "Tam kapatma için Görev Yöneticisi kullanılabilir.[/dim]",
+            title="[bold yellow]Pro Mode İçin Yapılacaklar[/bold yellow]",
+            border_style="yellow",
+            box=box.ROUNDED,
+        )
+    )
+
+
 def install_ollama() -> bool:
     """Download and install Ollama on Windows using PowerShell command."""
     if sys.platform != "win32":
@@ -167,6 +194,7 @@ def install_ollama() -> bool:
         if process.returncode == 0:
             console.print("\n[bold green]Ollama kurulum komutu başarıyla çalıştırıldı![/bold green]")
             console.print("[yellow]Not: PATH değişikliklerinin geçerli olması için terminali veya uygulamayı yeniden başlatmanız gerekebilir.[/yellow]\n")
+            show_ollama_next_steps("Kurulum tamamlandı.")
             return True
         else:
             console.print(f"\n[bold red]Kurulum sırasında bir hata oluştu (Exit Code: {process.returncode})[/bold red]")
@@ -280,6 +308,40 @@ def download_ollama_model(model_name: str, base_url: str = "http://localhost:114
         return False
 
 
+def ensure_ollama_model(
+    model_name: str,
+    available_models: list[str] | None = None,
+    base_url: str = "http://localhost:11434",
+    max_attempts: int = 2,
+) -> bool:
+    """Ensure model exists locally by downloading with retry and verification."""
+    current = available_models if available_models is not None else get_ollama_models(base_url=base_url)
+    if any(model_name.lower() == m.lower() for m in current):
+        return True
+
+    for attempt in range(1, max_attempts + 1):
+        console.print(
+            f"[cyan]{model_name} sistemde yok. Otomatik indirme başlatılıyor "
+            f"({attempt}/{max_attempts}).[/cyan]"
+        )
+        if not download_ollama_model(model_name, base_url=base_url):
+            continue
+
+        refreshed = get_ollama_models(base_url=base_url, timeout=8)
+        if any(model_name.lower() == m.lower() for m in refreshed):
+            return True
+
+        console.print(
+            f"[yellow]{model_name} indirildi ama listede doğrulanamadı. "
+            "Tekrar deneniyor...[/yellow]"
+        )
+
+    console.print(
+        f"[bold red]✗ {model_name} otomatik indirilemedi veya doğrulanamadı.[/bold red]"
+    )
+    return False
+
+
 def prompt_mode() -> tuple[Mode, str]:
     t = Table(box=None, show_header=False, padding=(0, 2))
     t.add_column(style="bold yellow", width=4)
@@ -316,7 +378,7 @@ def prompt_mode() -> tuple[Mode, str]:
                     
                     if should_install:
                         if install_ollama():
-                            console.print("\n[bold green]Ollama kuruldu. Uygulamayı yeniden başlatmanız önerilir.[/bold green]")
+                            console.print("\n[bold green]Ollama kuruldu. Şimdi otomatik başlatmayı deniyorum...[/bold green]")
                             # Try to wait a bit then start
                             time.sleep(2)
                             if start_ollama():
@@ -325,18 +387,20 @@ def prompt_mode() -> tuple[Mode, str]:
                                     # Fallthrough to model selection
                                     pass
                                 else:
-                                    console.print("[cyan]Model bulunamadı. Lütfen daha sonra manuel kurun.[/cyan]")
+                                    show_ollama_next_steps("Ollama çalışıyor ancak henüz model bulunamadı.")
                                     return Mode.FAST, "qwen3.5:2B"
                             else:
-                                console.print("[cyan]Ollama kuruldu ama başlatılamadı. Lütfen uygulamayı yeniden açın.[/cyan]")
+                                show_ollama_next_steps("Ollama kuruldu ancak otomatik başlatılamadı.")
                                 return Mode.FAST, "qwen3.5:2B"
                         else:
-                            console.print("[cyan]Kurulum başarısız oldu. Manuel kurmanız gerekebilir.[/cyan]")
+                            show_ollama_next_steps("Kurulum tamamlanamadı. Manuel kurulum gerekebilir.")
                             return Mode.FAST, "qwen3.5:2B"
                     else:
+                        show_ollama_next_steps("Otomatik kurulum atlandı.")
                         console.print("[cyan]Fast moduna geçiliyor...[/cyan]")
                         return Mode.FAST, "qwen3.5:2B"
                 else:
+                    show_ollama_next_steps("Bu sistemde otomatik kurulum yok. Manuel kurulum gerekli.")
                     console.print("[cyan]Fast moduna geçiliyor...[/cyan]")
                     return Mode.FAST, "qwen3.5:2B"
 
@@ -368,35 +432,42 @@ def prompt_mode() -> tuple[Mode, str]:
         mt.add_column(style="bold")
         mt.add_column(style="dim")
         
-        recommended_models = ["qwen3.5:2B", "qwen3.5:4B"]
-        
-        for rec_model in recommended_models:
+        recommended_models = [
+            ("qwen3.5:0.8B", "%95 Accurate"),
+            ("qwen3.5:2B", "Recommended"),
+            ("qwen3.5:4B", "Recommended"),
+        ]
+
+        for idx, (rec_model, badge) in enumerate(recommended_models, start=1):
             is_available = any(rec_model.lower() == m.lower() for m in available_models)
             status = "[bold green]Mevcut[/bold green]" if is_available else "[bold red]Mevcut Değil[/bold red]"
-            mt.add_row("[1]" if rec_model == "qwen3.5:2B" else "[2]", rec_model, status + " (Recommended)")
+            mt.add_row(f"[{idx}]", rec_model, status + f" ({badge})")
         
-        non_rec_models = [m for m in available_models if not any(m.lower() == r.lower() for r in recommended_models)]
+        recommended_names = [name for name, _ in recommended_models]
+        non_rec_models = [m for m in available_models if not any(m.lower() == r.lower() for r in recommended_names)]
         
         for idx, model in enumerate(non_rec_models, start=len(recommended_models) + 1):
             mt.add_row(f"[{idx}]", model, "")
         
         console.print(Panel(mt, title="[bold cyan]Ollama Model[/bold cyan]", border_style="cyan", box=box.ROUNDED))
 
-        choices = ["1", "2"] + [str(i) for i in range(len(recommended_models) + 1, len(non_rec_models) + len(recommended_models) + 1)]
+        choices = [str(i) for i in range(1, len(recommended_models) + 1)] + [
+            str(i) for i in range(len(recommended_models) + 1, len(non_rec_models) + len(recommended_models) + 1)
+        ]
         default_choice = "1"
         model_choice = Prompt.ask("[bold]Model[/bold]", choices=choices, default=default_choice)
         
-        if model_choice == "1":
-            model = "qwen3.5:2B"
-        elif model_choice == "2":
-            model = "qwen3.5:4B"
+        if int(model_choice) <= len(recommended_models):
+            model = recommended_models[int(model_choice) - 1][0]
         else:
             idx = int(model_choice) - len(recommended_models) - 1
             model = non_rec_models[idx]
         
         # Eğer seçilen model önerilen modellerden biriyse ve sistemde yoksa indir
-        if model in recommended_models and not any(model.lower() == m.lower() for m in available_models):
-            download_ollama_model(model)
+        if model in recommended_names and not any(model.lower() == m.lower() for m in available_models):
+            if not ensure_ollama_model(model, available_models=available_models):
+                console.print("[yellow]Model hazır olmadığı için Fast moduna geçiliyor.[/yellow]")
+                return Mode.FAST, "qwen3.5:2B"
             
         return mode, model
     
