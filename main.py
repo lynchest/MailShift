@@ -70,7 +70,7 @@ from engine import (
     ScanStats,
 )
 from database import save_mails_cache, load_mails_cache
-from pro_analyzer import check_ollama_health
+from pro_analyzer import check_ollama_health, close_ollama_session
 
 from ui import (
     console,
@@ -82,12 +82,14 @@ from ui import (
 from history import save_cleanup_log, export_scan_results, print_history
 from logger import log
 from cli_utils import (
+    ensure_ollama_intel_gpu,
     handle_keywords,
     handle_uninstall,
     prompt_credentials,
     prompt_custom_imap_settings,
     prompt_mode,
     prompt_provider,
+    cleanup_ollama_if_it_was_started_by_us,
 )
 
 def clean_text(text: Optional[str], max_len: int = 35) -> str:
@@ -230,6 +232,10 @@ def main(
 
     # ---- Ollama health check (Pro mode only) ----
     if resolved_mode == Mode.PRO:
+        # If Intel GPU is detected and Ollama is running without GPU support,
+        # restart Ollama with OLLAMA_INTEL_GPU=1 before the health check.
+        ensure_ollama_intel_gpu()
+
         with console.status("[cyan]Ollama bağlantısı kontrol ediliyor…[/cyan]", spinner="dots"):
             ok, msg = check_ollama_health(ollama_cfg.base_url, selected_ollama_model)
         if ok:
@@ -587,6 +593,10 @@ def main(
         # Engine referansı varsa her durumda güvenli bir şekilde kapat
         if engine is not None:
             engine.disconnect()
+
+        # Pro modda oturum ve otomatik başlatılan Ollama sürecini kapat
+        close_ollama_session()
+        cleanup_ollama_if_it_was_started_by_us()
 
 
 if __name__ == "__main__":

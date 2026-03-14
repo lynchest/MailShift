@@ -206,13 +206,12 @@ def test_pro_analyze_always_routes_to_provider_even_for_known_patterns():
     mock_analyze.assert_called_once()
 
 
-def test_default_prompt_contains_migrated_policy_guidance_examples():
+def test_default_prompt_contains_typical_examples():
     expected_phrases = [
-        "Kickstarter desteklenen proje güncellemeleri",
-        "OnlyFans abonelik kaynaklı içerik/mesaj bildirimleri",
-        "Emlakjet favori ilan/fiyat indirimi güncellemeleri",
-        "Yapı Kredi gibi güvenilir banka alan adından gelen harcama doğrulama",
-        "Belediye kaynaklı Ramazan/iftar program duyuruları",
+        "Sen bir e-posta temizleme asistanısın",
+        "SIL (Silinecekler - Gereksiz)",
+        "TUT (Tutulacaklar - Önemli)",
+        "JSON formatında cevap ver",
     ]
 
     for phrase in expected_phrases:

@@ -37,6 +37,7 @@ from ui import console, clear_console
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 _CREDENTIALS_FILE = Path(__file__).resolve().parent / "credentials.json"
+_OLLAMA_STARTED_BY_US = False  # Track if we started Ollama automatically
 
 
 def _load_saved_credentials() -> dict[str, dict[str, str]]:
@@ -207,29 +208,23 @@ def install_ollama() -> bool:
         return False
 
 
-def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
-    """
-    Try to start Ollama in the background.
-    Returns True if Ollama is now running, False otherwise.
-    """
-    console.print("\n[yellow]Ollama çalışmıyor, başlatılmaya çalışılıyor...[/yellow]")
-
-    if not check_ollama_installed():
-        return False
-
+def _build_ollama_env() -> dict[str, str]:
+    """Build an environment dict for launching Ollama with Intel GPU support when applicable."""
     ollama_env = os.environ.copy()
     try:
         system_info = get_system_info()
         if "intel" in (system_info.gpu_name or "").lower():
-            # Enable Intel backend path for Ollama when available.
-            ollama_env.setdefault("OLLAMA_INTEL_GPU", "1")
+            ollama_env["OLLAMA_INTEL_GPU"] = "1"
     except Exception:
         pass
+    return ollama_env
 
+
+def _launch_ollama_process(ollama_env: dict[str, str]) -> bool:
+    """Start an `ollama serve` subprocess with the given environment. Returns True on success."""
     if sys.platform == "win32":
         try:
-            # CREATE_NO_WINDOW (0x08000000) prevents CMD window from popping up
-            creation_flags = 0x08000000
+            creation_flags = 0x08000000  # CREATE_NO_WINDOW
             subprocess.Popen(
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
@@ -237,8 +232,9 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
                 stdin=subprocess.DEVNULL,
                 env=ollama_env,
                 creationflags=creation_flags,
-                close_fds=True
+                close_fds=True,
             )
+            return True
         except Exception:
             return False
     else:
@@ -250,12 +246,131 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
                 env=ollama_env,
                 start_new_session=True,
             )
+            return True
         except Exception:
             return False
+
+
+def stop_ollama() -> bool:
+    """Stop all running Ollama processes. Returns True if stop was attempted."""
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "ollama.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+            # Also kill the ollama_llama_server / runner processes
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "ollama_llama_server.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+            time.sleep(2)  # Give OS time to release ports
+            return True
+        except Exception:
+            return False
+    else:
+        try:
+            subprocess.run(
+                ["pkill", "-f", "ollama"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+            time.sleep(2)
+            return True
+        except Exception:
+            return False
+
+
+def cleanup_ollama_if_it_was_started_by_us():
+    """Stop Ollama if it was automatically started during this session."""
+    if _OLLAMA_STARTED_BY_US:
+        console.print("[cyan]Ollama otomatik olarak başlatılmıştı, şimdi kapatılıyor...[/cyan]")
+        stop_ollama()
+
+
+def _is_ollama_running() -> bool:
+    """Check if Ollama API is reachable."""
+    try:
+        import requests
+        resp = requests.get("http://localhost:11434/api/tags", timeout=3)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+def ensure_ollama_intel_gpu() -> bool:
+    """If Intel GPU is detected and Ollama is already running without OLLAMA_INTEL_GPU,
+    restart Ollama with the correct environment. Returns True if a restart was performed."""
+    try:
+        system_info = get_system_info()
+    except Exception:
+        return False
+
+    if "intel" not in (system_info.gpu_name or "").lower():
+        return False  # Not an Intel GPU, nothing to do
+
+    # If OLLAMA_INTEL_GPU is already in the current process environment,
+    # and Ollama is running, assume it was started correctly before.
+    if os.environ.get("OLLAMA_INTEL_GPU") == "1":
+        return False
+
+    if not _is_ollama_running():
+        return False  # Ollama not running; start_ollama will handle it
+
+    # Intel GPU detected, Ollama is running but likely without OLLAMA_INTEL_GPU=1.
+    console.print(
+        "[bold yellow]⚠ Intel GPU algılandı ama Ollama GPU desteği olmadan çalışıyor.[/bold yellow]\n"
+        "[cyan]Ollama, OLLAMA_INTEL_GPU=1 ile yeniden başlatılıyor...[/cyan]"
+    )
+
+    stop_ollama()
+
+    ollama_env = _build_ollama_env()
+    if not _launch_ollama_process(ollama_env):
+        console.print("[red]Ollama yeniden başlatılamadı.[/red]")
+        return False
+
+    # Wait for Ollama to come back up
+    for _ in range(5):
+        time.sleep(2)
+        if _is_ollama_running():
+            # Mark in current process env so we don't restart again
+            os.environ["OLLAMA_INTEL_GPU"] = "1"
+            console.print(
+                "[bold green]✓ Ollama Intel GPU desteğiyle yeniden başlatıldı![/bold green]"
+            )
+            return True
+
+    console.print("[red]Ollama yeniden başlatıldı ancak henüz yanıt vermiyor.[/red]")
+    return False
+
+
+def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
+    """
+    Try to start Ollama in the background.
+    Returns True if Ollama is now running, False otherwise.
+    """
+    console.print("\n[yellow]Ollama çalışmıyor, başlatılmaya çalışılıyor...[/yellow]")
+
+    if not check_ollama_installed():
+        return False
+
+    ollama_env = _build_ollama_env()
+
+    if not _launch_ollama_process(ollama_env):
+        return False
 
     for attempt in range(max_retries):
         time.sleep(retry_delay)
         if get_ollama_models():
+            # Mark in current process env for Intel GPU tracking
+            if ollama_env.get("OLLAMA_INTEL_GPU") == "1":
+                os.environ["OLLAMA_INTEL_GPU"] = "1"
             console.print("[green]Ollama başarıyla başlatıldı! (tamamen kapatmanız için görev yöneticisine bakmalısınız)[/green]")
             return True
 

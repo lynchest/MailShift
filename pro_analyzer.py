@@ -115,6 +115,14 @@ def _get_session() -> requests.Session:
     return _session
 
 
+def close_ollama_session():
+    """Close the persistent Ollama HTTP session if it exists."""
+    global _session
+    if _session is not None:
+        _session.close()
+        _session = None
+
+
 # ── Ollama health check ──────────────────────────────────────────────────
 
 def check_ollama_health(base_url: str = "http://localhost:11434", model: str = "") -> tuple[bool, str]:
