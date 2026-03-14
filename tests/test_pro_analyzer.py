@@ -140,6 +140,26 @@ def test_select_ollama_runtime_options_gpu(monkeypatch):
     assert options["num_thread"] == 8
 
 
+def test_select_ollama_runtime_options_intel_gpu_prefers_offload(monkeypatch):
+    intel_gpu_system = SystemInfo(
+        cpu_count=12,
+        total_ram_gb=32.0,
+        available_ram_gb=16.0,
+        has_gpu=True,
+        gpu_name="Intel(R) Arc(TM) Graphics",
+        vram_total_gb=8.0,
+        vram_available_gb=4.0,
+        gpu_driver="32.0.101.6078",
+    )
+    monkeypatch.setattr(pro_analyzer, "get_system_info", lambda: intel_gpu_system)
+    monkeypatch.setattr(pro_analyzer, "detect_model_size", lambda _model: 2.0)
+
+    options = pro_analyzer._select_ollama_runtime_options("qwen3.5:2B")
+
+    assert options["num_gpu"] == 99
+    assert options["use_flash_attn"] is False
+
+
 def test_ollama_provider_uses_dynamic_runtime_options():
     cfg = OllamaConfig(model="test_model", base_url="http://test")
     expected_options = {

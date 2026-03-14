@@ -14,7 +14,7 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 
 ## Features
 
-- **Multi provider support**: Gmail (IMAP + App Password), Proton Mail (via Proton Bridge), and Custom IMAP servers
+- **Multi provider support**: Gmail (IMAP + App Password), Proton Mail (Requires [Proton Bridge](https://proton.me/mail/bridge) and a paid account), and Custom IMAP servers
 - **Attachment protection**: Emails with attachments are never deleted
 - **Fast-mode safety guards**: Premium lifecycle expiry notices, verification code (OTP) emails, and Google Drive/cloud storage fullness alerts are force-kept in Fast mode before junk checks
 - **Fast-mode false-positive reduction**: Blacklist matching excludes the sender address so legitimate automated senders (e.g. `no-reply@github.com`) never trigger a junk decision; whitelist and safety-guard still consider the full sender context
@@ -197,6 +197,7 @@ Run Proton Bridge locally, then connect with bridge credentials.
 - Python 3.10+
 - IMAP access to your email provider
 - For Pro mode: [Ollama](https://ollama.com) running locally.
+    - On Windows with Intel GPU, MailShift starts `ollama serve` with `OLLAMA_INTEL_GPU=1` (when auto-start is used) and requests higher GPU layer offload in Pro mode to reduce unintended CPU-only inference.
     - Intel/AMD GPU acceleration still depends on Ollama backend support/driver stack; if Ollama cannot offload, inference can continue on CPU even when MailShift detects the GPU.
   - **Power User Tip**: Set the `OLLAMA_NUM_PARALLEL` environment variable to increase concurrent workers (default is 4).
   - **Note**: To close Ollama completely on Windows, you must use the Task Manager as it often runs without a visible window or system tray icon.

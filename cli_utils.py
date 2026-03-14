@@ -1,5 +1,6 @@
 import getpass
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -30,6 +31,7 @@ from config import (
     remove_from_blacklist,
     remove_from_whitelist,
 )
+from hardware import get_system_info
 from ui import console, clear_console
 
 
@@ -215,6 +217,15 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
     if not check_ollama_installed():
         return False
 
+    ollama_env = os.environ.copy()
+    try:
+        system_info = get_system_info()
+        if "intel" in (system_info.gpu_name or "").lower():
+            # Enable Intel backend path for Ollama when available.
+            ollama_env.setdefault("OLLAMA_INTEL_GPU", "1")
+    except Exception:
+        pass
+
     if sys.platform == "win32":
         try:
             # CREATE_NO_WINDOW (0x08000000) prevents CMD window from popping up
@@ -224,6 +235,7 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
+                env=ollama_env,
                 creationflags=creation_flags,
                 close_fds=True
             )
@@ -235,6 +247,7 @@ def start_ollama(max_retries: int = 3, retry_delay: int = 3) -> bool:
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=ollama_env,
                 start_new_session=True,
             )
         except Exception:

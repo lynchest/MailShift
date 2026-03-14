@@ -33,6 +33,10 @@ def _parse_bool_env(value: str) -> Optional[bool]:
     return None
 
 
+def _is_intel_gpu(gpu_name: str) -> bool:
+    return "intel" in (gpu_name or "").lower()
+
+
 def _select_ollama_runtime_options(model_name: str) -> dict[str, int | float | bool]:
     """Pick Ollama runtime options based on current machine capabilities."""
     options: dict[str, int | float | bool] = {
@@ -65,6 +69,12 @@ def _select_ollama_runtime_options(model_name: str) -> dict[str, int | float | b
 
             gpu_name = (system_info.gpu_name or "").lower()
             options["use_flash_attn"] = any(token in gpu_name for token in ("nvidia", "rtx", "gtx", "apple"))
+
+            if _is_intel_gpu(gpu_name):
+                # Intel iGPU shared-memory reporting is often conservative. Ask Ollama
+                # to offload as many layers as possible so it does not stay CPU-only.
+                options["num_gpu"] = max(int(options["num_gpu"]), 99)
+
             options["num_thread"] = max(2, min(int(options["num_thread"]), 8))
         else:
             options["num_gpu"] = 0

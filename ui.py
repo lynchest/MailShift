@@ -28,7 +28,7 @@ def print_banner() -> None:
     console.print(
         Panel(
             Text(BANNER, style="bold cyan", justify="center"),
-            subtitle="[dim]Privacy-first newsletter purger[/dim]",
+            subtitle="[dim]Privacy-first newsletter purger (Proton requires Bridge & Premium)[/dim]",
             border_style="cyan",
             box=box.DOUBLE_EDGE,
         )
