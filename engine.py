@@ -300,7 +300,7 @@ class MailEngine:
         assert self._conn, "Not connected"
         from database import mark_uids_fetched, get_fetched_uids, save_mails_cache
 
-        need_body = self.cfg.mode == Mode.PRO
+        need_body = False  # Optimization: fetch headers only by default; fetch bodies on-demand later
         rl = self._rl
 
         # --- checkpoint: skip already-fetched UIDs ---
@@ -334,7 +334,10 @@ class MailEngine:
 
             try:
                 chunk_results = _with_retry(
-                    _fetch, rl, label=f"fetch chunk {chunk_idx}/{total_chunks}"
+                    _fetch, rl, label=f"fetch chunk {chunk_idx}/{total_chunks}",
+                    on_error=lambda exc, attempt, lbl=(
+                        f"fetch chunk {chunk_idx}/{total_chunks}"
+                    ): self._recover_connection(exc, lbl, attempt),
                 )
             except Exception as exc:
                 log.error(
@@ -391,7 +394,10 @@ class MailEngine:
 
             try:
                 chunk_results = _with_retry(
-                    _fetch, rl, label=f"body chunk {chunk_idx}/{total_chunks}"
+                    _fetch, rl, label=f"body chunk {chunk_idx}/{total_chunks}",
+                    on_error=lambda exc, attempt, lbl=(
+                        f"body chunk {chunk_idx}/{total_chunks}"
+                    ): self._recover_connection(exc, lbl, attempt),
                 )
             except Exception as exc:
                 log.error(
@@ -444,6 +450,7 @@ class MailEngine:
         self,
         mails: list[MailMeta],
         progress_cb: Optional[Callable[[ScanResult], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> tuple[list[ScanResult], ScanStats]:
         from fast_analyzer import fast_analyze
         from pro_analyzer import pro_analyze
@@ -453,61 +460,86 @@ class MailEngine:
         stats_lock = Lock()
         need_llm = self.cfg.mode == Mode.PRO
 
-        max_workers = (
-            calculate_optimal_workers(
-                self.cfg.ollama.model,
-                self.cfg.mode.value,
-                manual_workers=self.cfg.max_workers
-            )
-            if need_llm
-            else (self.cfg.max_workers or max(1, __import__("os").cpu_count() or 4))
-        )
-        log.info(
-            f"analyze(): {len(mails)} mails, {max_workers} workers, "
-            f"LLM={'yes' if need_llm else 'no'}"
-        )
-
-        final_results: list[ScanResult | None] = [None] * len(mails)
-
-        def _process(idx: int, meta: MailMeta) -> tuple[int, ScanResult]:
-            """Run fast heuristic, then optionally LLM, for a single mail."""
+        # ── Phase 1: Fast heuristic scan ──
+        fast_results: list[ScanResult] = []
+        for meta in mails:
+            if cancel_event and cancel_event.is_set():
+                break
             res = fast_analyze(meta)
-            if need_llm and res.decision == "SIL":
-                res = pro_analyze(meta, self.cfg.ollama)
+            fast_results.append(res)
+        
+        if not need_llm or (cancel_event and cancel_event.is_set()):
+            # If not PRO mode or cancelled, we are done with fast results
+            for res in fast_results:
+                self._record_stats(stats, stats_lock, res, progress_cb)
+            return fast_results, stats
+
+        # ── Phase 2: Batch fetch bodies only for SIL candidates ──
+        sil_candidates = [r for r in fast_results if r.decision == "SIL"]
+        tut_results = [r for r in fast_results if r.decision == "TUT"]
+        
+        need_body_mails = [r.mail for r in sil_candidates if not r.mail.body_preview]
+        if need_body_mails:
+            log.info(f"analyze(): Fetching bodies for {len(need_body_mails)} candidates")
+            self.fetch_body_for_cached_mails(need_body_mails)
+
+        # ── Phase 3: Parallel LLM verification ──
+        max_workers = calculate_optimal_workers(
+            self.cfg.ollama.model,
+            self.cfg.mode.value,
+            manual_workers=self.cfg.max_workers
+        )
+        
+        llm_results: list[ScanResult | None] = [None] * len(sil_candidates)
+
+        def _llm_worker(idx: int, candidate: ScanResult) -> tuple[int, ScanResult]:
+            if cancel_event and cancel_event.is_set():
+                return idx, ScanResult(mail=candidate.mail, decision="TUT", reason="cancelled")
+            
+            llm_cfg = self.cfg.lm_studio if self.cfg.llm_backend == "lm_studio" else self.cfg.ollama
+            res = pro_analyze(
+                candidate.mail, 
+                llm_cfg, 
+                backend=self.cfg.llm_backend, 
+                fast_reason=candidate.reason,
+                cancel_event=cancel_event
+            )
             return idx, res
 
-        def _record(idx: int, res: ScanResult) -> None:
-            final_results[idx] = res
-            with stats_lock:
-                stats.total_scanned += 1
-                stats.total_size_bytes += res.mail.size_bytes
-                if res.decision == "SIL":
-                    stats.marked_for_deletion += 1
-                    stats.marked_size_bytes += res.mail.size_bytes
-            if progress_cb:
-                progress_cb(res)
-
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {
-                executor.submit(_process, idx, meta): idx
-                for idx, meta in enumerate(mails)
+            future_to_idx = {
+                executor.submit(_llm_worker, i, c): i 
+                for i, c in enumerate(sil_candidates)
             }
-            for future in as_completed(future_map):
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
                 try:
-                    idx, res = future.result()
-                    _record(idx, res)
+                    _, res = future.result()
+                    llm_results[idx] = res
                 except Exception as exc:
-                    idx = future_map[future]
-                    log.warning(f"analyze task failed for mail index {idx}: {exc}")
-                    # Fallback: keep mail to stay safe
-                    _record(
-                        idx,
-                        ScanResult(
-                            mail=mails[idx], decision="TUT", reason="analyze-error"
-                        ),
+                    log.warning(f"LLM worker failed for candidate {idx}: {exc}")
+                    llm_results[idx] = ScanResult(
+                        mail=sil_candidates[idx].mail, 
+                        decision="TUT", 
+                        reason=f"analyze-error:{exc}"
                     )
 
-        return [r for r in final_results if r is not None], stats
+        # Combine results and record stats
+        final_results = tut_results + [r for r in llm_results if r is not None]
+        for res in final_results:
+            self._record_stats(stats, stats_lock, res, progress_cb)
+
+        return final_results, stats
+
+    def _record_stats(self, stats: ScanStats, lock: Lock, res: ScanResult, cb: Optional[Callable]) -> None:
+        with lock:
+            stats.total_scanned += 1
+            stats.total_size_bytes += res.mail.size_bytes
+            if res.decision == "SIL":
+                stats.marked_for_deletion += 1
+                stats.marked_size_bytes += res.mail.size_bytes
+        if cb:
+            cb(res)
 
     # ------------------------------------------------------------------
     # Deletion / trash — rate-limit + retry on every chunk

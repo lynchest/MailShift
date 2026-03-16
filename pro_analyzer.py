@@ -93,7 +93,7 @@ def _get_session() -> requests.Session:
     if _session is None:
         _session = requests.Session()
         adapter = requests.adapters.HTTPAdapter(
-            pool_connections=1,
+            pool_connections=4,
             pool_maxsize=32,
             max_retries=requests.adapters.Retry(
                 total=2, backoff_factor=0.3,
@@ -237,7 +237,7 @@ class LLMProvider(ABC):
     """Base interface for LLM-based email analysis."""
 
     @abstractmethod
-    def analyze(self, meta: MailMeta) -> ScanResult:
+    def analyze(self, meta: MailMeta, fast_reason: str = "", cancel_event: Optional[threading.Event] = None) -> ScanResult:
         """Analyze an email and return a ScanResult."""
 
     def _parse_llm_response(self, response: str) -> tuple[str, str]:
@@ -339,17 +339,23 @@ class OllamaProvider(LLMProvider):
         self.runtime_options = _select_ollama_runtime_options(cfg.model)
 
     @staticmethod
-    def _build_user_prompt(meta: MailMeta, max_body_chars: int) -> str:
+    def _build_user_prompt(meta: MailMeta, max_body_chars: int, fast_reason: str = "") -> str:
         body = (meta.body_preview or "")[:max_body_chars]
+        hint = ""
+        if fast_reason:
+            hint = f"\nÖn Analiz (heuristik): Bu e-posta '{fast_reason}' kuralıyla SIL olarak işaretlendi.\n"
         return (
             "Aşağıdaki e-postayı sınıflandır. Sadece karar ver.\n\n"
             f"Konu: {meta.subject}\n"
             f"Gönderen: {meta.sender}\n"
             f"İçerik: {body}"
+            f"{hint}"
         )
 
-    def analyze(self, meta: MailMeta) -> ScanResult:
-        user_prompt = self._build_user_prompt(meta, self.cfg.max_body_chars)
+    def analyze(self, meta: MailMeta, fast_reason: str = "", cancel_event: Optional[threading.Event] = None) -> ScanResult:
+        if cancel_event and cancel_event.is_set():
+            return ScanResult(mail=meta, decision="TUT", reason="cancelled")
+        user_prompt = self._build_user_prompt(meta, self.cfg.max_body_chars, fast_reason)
         payload = {
             "model": self.cfg.model,
             "messages": [
@@ -370,27 +376,36 @@ class OllamaProvider(LLMProvider):
                 **self.runtime_options,
             }
         }
-        try:
-            resp = _get_session().post(
-                f"{self.cfg.base_url}/api/chat",
-                json=payload,
-                timeout=self.cfg.timeout,
-            )
-            resp.raise_for_status()
-            body = resp.json()
-            raw_response = ""
-            message = body.get("message")
-            if isinstance(message, dict):
-                raw_response = str(message.get("content", "")).strip()
-            if not raw_response:
-                raw_response = str(body.get("response", "")).strip()
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                resp = _get_session().post(
+                    f"{self.cfg.base_url}/api/chat",
+                    json=payload,
+                    timeout=self.cfg.timeout,
+                )
+                resp.raise_for_status()
+                body = resp.json()
+                raw_response = ""
+                message = body.get("message")
+                if isinstance(message, dict):
+                    raw_response = str(message.get("content", "")).strip()
+                if not raw_response:
+                    raw_response = str(body.get("response", "")).strip()
 
-            decision, reason = self._parse_llm_response(raw_response)
-            return ScanResult(mail=meta, decision=decision, reason=f"llm:{decision} - {reason}")
+                decision, reason = self._parse_llm_response(raw_response)
+                return ScanResult(mail=meta, decision=decision, reason=f"llm:{decision} - {reason}")
 
-        except Exception as exc:
-            log.warning(f"Ollama API error: {exc}")
-            return ScanResult(mail=meta, decision="TUT", reason=f"llm-error:{exc}")
+            except requests.Timeout:
+                if attempt < max_attempts - 1:
+                    log.warning(f"Ollama timeout for UID {meta.uid}, retrying...")
+                    continue
+                log.warning(f"Ollama timeout for UID {meta.uid}, all retries exhausted")
+                return ScanResult(mail=meta, decision="TUT", reason="llm-timeout")
+            except Exception as exc:
+                log.warning(f"Ollama API error: {exc}")
+                return ScanResult(mail=meta, decision="TUT", reason=f"llm-error:{exc}")
+        return ScanResult(mail=meta, decision="TUT", reason="llm-error:unexpected")
 
 
 class LMStudioProvider(LLMProvider):
@@ -400,17 +415,23 @@ class LMStudioProvider(LLMProvider):
         self.cfg = cfg
 
     @staticmethod
-    def _build_user_prompt(meta: MailMeta, max_body_chars: int) -> str:
+    def _build_user_prompt(meta: MailMeta, max_body_chars: int, fast_reason: str = "") -> str:
         body = (meta.body_preview or "")[:max_body_chars]
+        hint = ""
+        if fast_reason:
+            hint = f"\nÖn Analiz (heuristik): Bu e-posta '{fast_reason}' kuralıyla SIL olarak işaretlendi.\n"
         return (
             "Aşağıdaki e-postayı sınıflandır. Sadece karar ver.\n\n"
             f"Konu: {meta.subject}\n"
             f"Gönderen: {meta.sender}\n"
             f"İçerik: {body}"
+            f"{hint}"
         )
 
-    def analyze(self, meta: MailMeta) -> ScanResult:
-        user_prompt = self._build_user_prompt(meta, self.cfg.max_body_chars)
+    def analyze(self, meta: MailMeta, fast_reason: str = "", cancel_event: Optional[threading.Event] = None) -> ScanResult:
+        if cancel_event and cancel_event.is_set():
+            return ScanResult(mail=meta, decision="TUT", reason="cancelled")
+        user_prompt = self._build_user_prompt(meta, self.cfg.max_body_chars, fast_reason)
         payload = {
             "model": self.cfg.model,
             "messages": [
@@ -421,26 +442,35 @@ class LMStudioProvider(LLMProvider):
             "temperature": 0.0,
             "max_tokens": 256,
         }
-        try:
-            resp = _get_session().post(
-                f"{self.cfg.base_url}/v1/chat/completions",
-                json=payload,
-                timeout=self.cfg.timeout,
-            )
-            resp.raise_for_status()
-            body = resp.json()
-            raw_response = ""
-            choices = body.get("choices", [])
-            if choices and isinstance(choices[0], dict):
-                message = choices[0].get("message", {})
-                raw_response = str(message.get("content", "")).strip()
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                resp = _get_session().post(
+                    f"{self.cfg.base_url}/v1/chat/completions",
+                    json=payload,
+                    timeout=self.cfg.timeout,
+                )
+                resp.raise_for_status()
+                body = resp.json()
+                raw_response = ""
+                choices = body.get("choices", [])
+                if choices and isinstance(choices[0], dict):
+                    message = choices[0].get("message", {})
+                    raw_response = str(message.get("content", "")).strip()
 
-            decision, reason = self._parse_llm_response(raw_response)
-            return ScanResult(mail=meta, decision=decision, reason=f"llm:{decision} - {reason}")
+                decision, reason = self._parse_llm_response(raw_response)
+                return ScanResult(mail=meta, decision=decision, reason=f"llm:{decision} - {reason}")
 
-        except Exception as exc:
-            log.warning(f"LM Studio API error: {exc}")
-            return ScanResult(mail=meta, decision="TUT", reason=f"llm-error:{exc}")
+            except requests.Timeout:
+                if attempt < max_attempts - 1:
+                    log.warning(f"LM Studio timeout for UID {meta.uid}, retrying...")
+                    continue
+                log.warning(f"LM Studio timeout for UID {meta.uid}, all retries exhausted")
+                return ScanResult(mail=meta, decision="TUT", reason="llm-timeout")
+            except Exception as exc:
+                log.warning(f"LM Studio API error: {exc}")
+                return ScanResult(mail=meta, decision="TUT", reason=f"llm-error:{exc}")
+        return ScanResult(mail=meta, decision="TUT", reason="llm-error:unexpected")
 
 
 # ── Cached provider instance & Main Entry ────────────────────────────────
@@ -451,6 +481,8 @@ def pro_analyze(
     meta: MailMeta,
     cfg: Union[OllamaConfig, LMStudioConfig],
     backend: str = "ollama",
+    fast_reason: str = "",
+    cancel_event: Optional[threading.Event] = None,
 ) -> ScanResult:
     """Analyze a single email via cached LLM provider."""
     cache_key = f"{backend}|{cfg.base_url}|{cfg.model}"
@@ -459,4 +491,4 @@ def pro_analyze(
             _provider_cache[cache_key] = LMStudioProvider(cfg)  # type: ignore[arg-type]
         else:
             _provider_cache[cache_key] = OllamaProvider(cfg)  # type: ignore[arg-type]
-    return _provider_cache[cache_key].analyze(meta)
+    return _provider_cache[cache_key].analyze(meta, fast_reason=fast_reason, cancel_event=cancel_event)

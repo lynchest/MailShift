@@ -21,6 +21,7 @@ import sys
 import io
 import re
 import time
+import threading
 import unicodedata
 from typing import Optional
 
@@ -360,30 +361,6 @@ def main(
                 engine.fetch_headers_concurrent(missing_uids, progress_cb=_on_fetch)
             console.print(f"[green]Yeni başlıklar eklendi.[/green]")
 
-        # ---- fetch bodies for Pro Mode if missing ----
-        if resolved_mode == Mode.PRO:
-            need_body = [m for m in mails if not m.body_preview]
-            if need_body:
-                console.print(f"[cyan]Pro mode: [bold]{len(need_body)}[/bold] iletinin içeriği (body) çekiliyor…[/cyan]")
-                with Progress(
-                    SpinnerColumn(), TextColumn("[bold cyan]Body Fetching[/bold cyan]"),
-                    BarColumn(), TaskProgressColumn(),
-                    TextColumn("[dim]{task.fields[current]}[/dim]"),
-                    TimeElapsedColumn(), console=console, transient=True,
-                    redirect_stdout=True, redirect_stderr=True,
-                ) as progress:
-                    task = progress.add_task("body_fetch", total=len(need_body), current="Starting…")
-
-                    def _on_body(meta: MailMeta) -> None:
-                        # DÜZELTME: Satır sonu karakterlerinden arındırma
-                        progress.update(
-                            task, advance=1,
-                            current=clean_text(meta.sender, max_len=24)
-                        )
-
-                    engine.fetch_body_for_cached_mails(need_body, progress_cb=_on_body)
-                console.print(f"[green]İleti içerikleri güncellendi.[/green]")
-
         # Save merged results back to cache
         save_mails_cache(mails)
 
@@ -426,6 +403,28 @@ def main(
             if sil_candidates:
                 from pro_analyzer import pro_analyze
 
+                # Fetch bodies only for SIL candidates that need them (optimization)
+                need_body_mails = [r.mail for r in sil_candidates if not r.mail.body_preview]
+                if need_body_mails:
+                    console.print(f"[cyan]Pro mode: [bold]{len(need_body_mails)}[/bold] SIL adayı için içerik (body) çekiliyor…[/cyan]")
+                    with Progress(
+                        SpinnerColumn(), TextColumn("[bold cyan]Body Fetching (SIL only)[/bold cyan]"),
+                        BarColumn(), TaskProgressColumn(),
+                        TextColumn("[dim]{task.fields[current]}[/dim]"),
+                        TimeElapsedColumn(), console=console, transient=True,
+                        redirect_stdout=True, redirect_stderr=True,
+                    ) as progress:
+                        body_task = progress.add_task("body_fetch", total=len(need_body_mails), current="Starting…")
+
+                        def _on_body(meta: MailMeta) -> None:
+                            progress.update(
+                                body_task, advance=1,
+                                current=clean_text(meta.sender, max_len=24)
+                            )
+
+                        engine.fetch_body_for_cached_mails(need_body_mails, progress_cb=_on_body)
+                    console.print(f"[green]İleti içerikleri güncellendi.[/green]")
+
                 llm_verified: list[ScanResult] = []
                 max_workers = calculate_optimal_workers(
                     selected_ollama_model, 
@@ -451,10 +450,18 @@ def main(
 
                     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+                    cancel_event = threading.Event()
+
                     def _llm_worker(idx_result):
                         idx, candidate = idx_result
+                        if cancel_event.is_set():
+                            return idx, ScanResult(
+                                mail=candidate.mail,
+                                decision="TUT",
+                                reason="cancelled",
+                            )
                         llm_cfg = cfg.lm_studio if cfg.llm_backend == "lm_studio" else cfg.ollama
-                        return idx, pro_analyze(candidate.mail, llm_cfg, cfg.llm_backend)
+                        return idx, pro_analyze(candidate.mail, llm_cfg, cfg.llm_backend, fast_reason=candidate.reason, cancel_event=cancel_event)
 
                     with ThreadPoolExecutor(max_workers=max_workers) as executor:
                         futures = {
@@ -650,6 +657,9 @@ def main(
 
     except KeyboardInterrupt:
         log.warning("Process interrupted by user (KeyboardInterrupt)")
+        # Signal any in-progress LLM workers to stop
+        if 'cancel_event' in dir():
+            cancel_event.set()  # type: ignore[possibly-undefined]
         console.print("\n[bold yellow]İşlem kullanıcı tarafından durduruldu.[/bold yellow]")
     except Exception as e:
         log.exception("An unexpected error occurred during execution.")

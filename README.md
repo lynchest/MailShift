@@ -16,6 +16,7 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 
 - **Multi provider support**: Gmail (IMAP + App Password), Proton Mail (Requires [Proton Bridge](https://proton.me/mail/bridge) and a paid account), and Custom IMAP servers
 - **Attachment protection**: Emails with attachments are never deleted
+- **Phishing detection limitation**: This tool is not designed to detect and delete phishing emails. LLM models cannot reliably distinguish between phishing and legitimate emails.
 - **Fast-mode safety guards**: Premium lifecycle expiry notices, verification code (OTP) emails, and Google Drive/cloud storage fullness alerts are force-kept in Fast mode before junk checks
 - **Fast-mode false-positive reduction**: Blacklist matching excludes the sender address so legitimate automated senders (e.g. `no-reply@github.com`) never trigger a junk decision; whitelist and safety-guard still consider the full sender context
 - **Turkish case normalization**: Fast-mode text is normalized (Turkish İ → i) before heuristic matching, fixing missed matches on properly-capitalised Turkish subjects

@@ -126,8 +126,6 @@ _WHITELIST_ESCAPED = [re.escape(k) for k in WHITELIST_KEYWORDS_LOWER]
 
 JUNK_PATTERN = re.compile('|'.join(_JUNK_ESCAPED), re.IGNORECASE) if _JUNK_ESCAPED else None
 WHITELIST_PATTERN = re.compile('|'.join(_WHITELIST_ESCAPED), re.IGNORECASE) if _WHITELIST_ESCAPED else None
-
-
 DEFAULT_SYSTEM_PROMPT = """
 Sen bir e-posta temizleme asistanısın. Görevin, gelen kutusundaki gereksiz (junk/spam/marketing) e-postaları SIL (Sil) veya TUT (Tut) olarak sınıflandırmaktır.
 
@@ -139,7 +137,7 @@ TUT (Tutulacaklar - Önemli):
 3. Finans/Resmi: Banka ekstreleri, faturalar, vergi ödemeleri, resmi kurum (e-devlet, belediye su/elektrik) bildirimleri.
 4. Güvenlik: Doğrulama kodları (OTP), şifre sıfırlama, güvenlik uyarıları.
 5. İş Araçları: GitHub PR bildirimleri, Jira kritik hatalar, Slack direkt mesaj bildirimleri, Drive paylaşımları.
-6. Ödemeli/Değerli İçerik: Substack/Medium gibi gerçekten takip ettiğin yazarların içerikleri.
+6. Ödemeli/Değerli İçerik: Substack/Medium gibi gerçekten takip ettiğin yazarların ÜCRETSİZ içerikleri. "Yeni ücretli yazı", "Premium içerik erişimi", "Ücretli abonelik" gibi ücretli içerik bildirimleri/pazarlama e-postaları -> SIL.
 
 SIL (Silinecekler - Gereksiz):
 1. Pazarlama ve Promosyon: "İndirim", "Kampanya", "%50 fırsat", "Sadece sana özel", "VIP", "Son şans", "Kaçırma".
@@ -147,8 +145,15 @@ SIL (Silinecekler - Gereksiz):
 3. Sosyal Medya/Platform Bildirimleri: "X kişisi yeni video yükledi", "Youtube: Abone olduğun kanal...", "Yeni takipçi", "Trendler", "Popüler konular".
 4. Onboarding/Hoşgeldin: "MailShift'e Hoşgeldin", "Hadi Başlayalım", "Profilini Tamamla".
 5. Otomatik Duyurular: İftar programları, genel etkinlik duyuruları, anketler.
+6. Referral/Davet Pazarlaması: "Arkadaşını davet et", "Seni bekliyor", "Davet bonusu", "X TL kazan", "Profilini tamamla, X TL kazan", "Puan kazan" gibi arkadaş referans programları ve gamification (oyunlaştırma) e-postaları.
+7. Platform Önerileri: Netflix/Spotify/YouTube dizi/film/şarkı önerileri, Udemy/Coursera kurs önerileri, uygulama önerileri. Bunlar kişisel değil otomatik öneri sistemleridir.
+8. Ücretsiz Deneme/Seviye Testi: "Ücretsiz deneme", "Free trial", "Ücretsiz seviye testi", "Premium deneme süresi" gibi müşteri çekme amaçlı teknikler.
 
-KRİTİK KURAL: Eğer e-posta bir ürünü satmaya, bir siteye geri çağırmaya veya genel bir bilgi (digest) vermeye çalışıyorsa SIL kararını ver.
+KRİTİK KURALLAR:
+1. Eğer e-posta bir ürünü satmaya, bir siteye geri çağırma (engagement) veya genel bir bilgi (digest) vermeye çalışıyorsa SIL kararını ver.
+2. "Ücretsiz", "kurs önerisi", "yeni dizi", "profilini tamamla" gibi ifadeler iş başvurusu veya kişisel mesaj DEĞİLDİR. Bunlar platformların kullanıcıyı geri çağırma ve pazarlama stratejileridir — SIL olarak işaretle.
+3. Ödül, para veya puan vaadiyle profil tamamlatma veya arkadaş davet etme e-postaları her zaman pazarlama kategorisindedir ve SIL olmalıdır.
+4. EĞER AÇIKLAMANIZDA "pazarlama stratejisi", "geri çağırma", "kampanya" veya "promosyon" ifadelerini kullanıyorsanız, kararınız MUTLAKA "SIL" olmalıdır. Kararsız kalırsanız SIL tarafında olun.
 
 ÖRNEKLER:
 - "Annenden: Market listesi" -> TUT
@@ -159,6 +164,11 @@ KRİTİK KURAL: Eğer e-posta bir ürünü satmaya, bir siteye geri çağırmaya
 - "Doğrula kodu: 123456" -> TUT
 - "Ramazan İftar Programı Duyurusu" -> SIL
 - "Mailchimp: Hoşgeldiniz" -> SIL
+- "Ücretsiz Premium Deneme – Sadece 3 Gün!" -> SIL
+- "Netflix: Yeni dizi önerisi" -> SIL
+- "Udemy: Yeni kurs önerisi" -> SIL
+- "Arkadaşın Seni Bekliyor – 200 TL Çek" -> SIL
+- "Profilini Tamamla, 100 TL Kazan" -> SIL
 
 E-posta şudur:
 """
@@ -169,7 +179,7 @@ class OllamaConfig(BaseModel):
 
     base_url: str = "http://localhost:11434"
     model: str = "qwen3.5:0.8B"
-    timeout: int = 300
+    timeout: int = 60
     max_body_chars: int = 500
 
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
@@ -182,7 +192,7 @@ class LMStudioConfig(BaseModel):
 
     base_url: str = "http://localhost:1234"
     model: str = ""
-    timeout: int = 300
+    timeout: int = 60
     max_body_chars: int = 500
 
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
