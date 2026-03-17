@@ -1,11 +1,10 @@
 import pytest
 import requests
 from unittest.mock import patch, MagicMock
-from hardware import SystemInfo
-
-import pro_analyzer
-from models import MailMeta
-from config import OllamaConfig, DEFAULT_SYSTEM_PROMPT
+from mailshift.utils.hardware import SystemInfo
+from mailshift.core.analyzers import pro as pro_analyzer
+from mailshift.models.models import MailMeta
+from mailshift.config.config import OllamaConfig, DEFAULT_SYSTEM_PROMPT
 
 
 def test_check_ollama_health_success():

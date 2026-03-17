@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, mock_open
 from pydantic import ValidationError
 
-from config import (
+from mailshift.config.config import (
     Provider,
     Mode,
     IMAPConfig,
@@ -58,8 +58,8 @@ def test_app_config_initialization():
     assert isinstance(app_cfg.rate_limit, RateLimitConfig)
 
 
-@patch("config._load_keywords")
-@patch("config._save_keywords")
+@patch("mailshift.config.config._load_keywords")
+@patch("mailshift.config.config._save_keywords")
 def test_keywords_management(_save_mock, _load_mock):
     # Test whitelist scenarios
     _load_mock.return_value = ["important"]

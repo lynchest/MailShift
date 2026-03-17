@@ -9,9 +9,9 @@ import pytest
 import requests
 from email.message import Message
 
-from fast_analyzer import fast_analyze
-from pro_analyzer import pro_analyze
-from config import (
+from mailshift.core.analyzers.fast import fast_analyze
+from mailshift.core.analyzers.pro import pro_analyze
+from mailshift.config.config import (
     AppConfig,
     IMAPConfig,
     Mode,
@@ -19,7 +19,8 @@ from config import (
     Provider,
     build_imap_config,
 )
-from engine import MailEngine, MailMeta, ScanResult, ScanStats, _extract_body_preview
+from mailshift.core.engine import MailEngine, _extract_body_preview
+from mailshift.models.models import MailMeta, ScanResult, ScanStats
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +118,7 @@ def test_fast_analyze_whitelist_order():
 
 
 def test_fast_analyze_no_match_keeps_mail():
-    meta = _make_meta(subject="Hey, are you free this weekend?", body="Let me know!")
+    meta = _make_meta(subject="Hey, are you around this weekend?", body="Let me know!")
     result = fast_analyze(meta)
     assert result.decision == "TUT"
     assert result.reason == "no match"
@@ -217,7 +218,7 @@ def _mock_ollama_response(response_text: str):
 
 def test_pro_analyze_sil_decision():
     meta = _make_meta(subject="Big sale newsletter!", body="Unsubscribe here")
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         mock_session.post.return_value = _mock_ollama_response("SIL")
@@ -229,7 +230,7 @@ def test_pro_analyze_sil_decision():
 
 def test_pro_analyze_tut_decision():
     meta = _make_meta(subject="Meeting notes", body="Please review the attached agenda.")
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         mock_session.post.return_value = _mock_ollama_response("TUT")
@@ -241,7 +242,7 @@ def test_pro_analyze_tut_decision():
 def test_pro_analyze_falls_back_to_tut_on_error():
     """Any network / API error must default to TUT (keep) to protect important mail."""
     meta = _make_meta(subject="Important update")
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         mock_session.post.side_effect = requests.ConnectionError("refused")
@@ -261,7 +262,7 @@ def test_pro_analyze_truncates_body_to_max_chars():
         captured_payload.update(json)
         return _mock_ollama_response("TUT")
 
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         mock_session.post.side_effect = capture_post
@@ -318,7 +319,7 @@ def test_engine_analyze_pro_mode_uses_llm_for_flagged():
     engine = MailEngine(cfg)
     mails = [_make_meta(uid="1", body="unsubscribe – big sale!")]
 
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         mock_session.post.return_value = _mock_ollama_response("SIL")
@@ -334,7 +335,7 @@ def test_engine_analyze_pro_mode_llm_overrides_heuristic_tut():
     engine = MailEngine(cfg)
     mails = [_make_meta(uid="1", body="unsubscribe")]
 
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         mock_session.post.return_value = _mock_ollama_response("TUT")
@@ -350,7 +351,7 @@ def test_engine_analyze_pro_mode_clean_mail_skips_llm():
     engine = MailEngine(cfg)
     mails = [_make_meta(uid="1", subject="Hello", body="Let's meet tomorrow.")]
 
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         results, stats = engine.analyze(mails)
@@ -533,7 +534,7 @@ def test_fast_analyze_whitelist_order():
 
 
 def test_fast_analyze_no_match_keeps_mail():
-    meta = _make_meta(subject="Hey, are you free this weekend?", body="Let me know!")
+    meta = _make_meta(subject="Hey, are you around this weekend?", body="Let me know!")
     result = fast_analyze(meta)
     assert result.decision == "TUT"
     assert result.reason == "no match"

@@ -1,11 +1,12 @@
-import sqlite3
+﻿import sqlite3
 from pathlib import Path
 from typing import Optional
 from contextlib import contextmanager
 
-from models import MailMeta
+from ..models.models import MailMeta
+from ..utils.paths import get_path
 
-DB_FILE = Path("mailshift.db")
+DB_FILE = get_path("mailshift.db")
 
 @contextmanager
 def get_db_connection():

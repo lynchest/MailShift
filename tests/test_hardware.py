@@ -1,13 +1,13 @@
 from unittest.mock import patch
 
-from hardware import calculate_optimal_workers, get_system_info
+from mailshift.utils.hardware import calculate_optimal_workers, get_system_info
 
 
-@patch("hardware.psutil.cpu_count", return_value=8)
-@patch("hardware.psutil.virtual_memory")
-@patch("hardware.platform.machine", return_value="AMD64")
-@patch("hardware.platform.system", return_value="Windows")
-@patch("hardware.subprocess.check_output")
+@patch("mailshift.utils.hardware.psutil.cpu_count", return_value=8)
+@patch("mailshift.utils.hardware.psutil.virtual_memory")
+@patch("mailshift.utils.hardware.platform.machine", return_value="AMD64")
+@patch("mailshift.utils.hardware.platform.system", return_value="Windows")
+@patch("mailshift.utils.hardware.subprocess.check_output")
 def test_get_system_info_detects_intel_gpu(
     mock_check_output,
     _mock_system,
@@ -32,11 +32,11 @@ def test_get_system_info_detects_intel_gpu(
     assert info.gpu_driver == "32.0.101.6078"
 
 
-@patch("hardware.psutil.cpu_count", return_value=8)
-@patch("hardware.psutil.virtual_memory")
-@patch("hardware.platform.machine", return_value="AMD64")
-@patch("hardware.platform.system", return_value="Windows")
-@patch("hardware.subprocess.check_output")
+@patch("mailshift.utils.hardware.psutil.cpu_count", return_value=8)
+@patch("mailshift.utils.hardware.psutil.virtual_memory")
+@patch("mailshift.utils.hardware.platform.machine", return_value="AMD64")
+@patch("mailshift.utils.hardware.platform.system", return_value="Windows")
+@patch("mailshift.utils.hardware.subprocess.check_output")
 def test_get_system_info_intel_uses_shared_ram_when_vram_missing(
     mock_check_output,
     _mock_system,
@@ -60,7 +60,7 @@ def test_get_system_info_intel_uses_shared_ram_when_vram_missing(
     assert info.vram_available_gb > 0.5
 
 
-@patch("hardware.get_system_info")
+@patch("mailshift.utils.hardware.get_system_info")
 def test_calculate_optimal_workers_uses_gpu_branch_for_intel(mock_get_system_info):
     info = type(
         "SysInfo",
@@ -83,11 +83,11 @@ def test_calculate_optimal_workers_uses_gpu_branch_for_intel(mock_get_system_inf
     assert workers >= 2
 
 
-@patch("hardware.psutil.cpu_count", return_value=8)
-@patch("hardware.psutil.virtual_memory")
-@patch("hardware.platform.machine", return_value="AMD64")
-@patch("hardware.platform.system", return_value="Windows")
-@patch("hardware.subprocess.check_output")
+@patch("mailshift.utils.hardware.psutil.cpu_count", return_value=8)
+@patch("mailshift.utils.hardware.psutil.virtual_memory")
+@patch("mailshift.utils.hardware.platform.machine", return_value="AMD64")
+@patch("mailshift.utils.hardware.platform.system", return_value="Windows")
+@patch("mailshift.utils.hardware.subprocess.check_output")
 def test_get_system_info_detects_amd_gpu(
     mock_check_output,
     _mock_system,
@@ -113,11 +113,11 @@ def test_get_system_info_detects_amd_gpu(
     assert info.gpu_driver == "31.0.22000.1000"
 
 
-@patch("hardware.psutil.cpu_count", return_value=8)
-@patch("hardware.psutil.virtual_memory")
-@patch("hardware.platform.machine", return_value="AMD64")
-@patch("hardware.platform.system", return_value="Windows")
-@patch("hardware.subprocess.check_output")
+@patch("mailshift.utils.hardware.psutil.cpu_count", return_value=8)
+@patch("mailshift.utils.hardware.psutil.virtual_memory")
+@patch("mailshift.utils.hardware.platform.machine", return_value="AMD64")
+@patch("mailshift.utils.hardware.platform.system", return_value="Windows")
+@patch("mailshift.utils.hardware.subprocess.check_output")
 def test_get_system_info_amd_uses_shared_ram_when_vram_missing(
     mock_check_output,
     _mock_system,
@@ -142,7 +142,7 @@ def test_get_system_info_amd_uses_shared_ram_when_vram_missing(
     assert info.vram_available_gb > 0.5
 
 
-@patch("hardware.get_system_info")
+@patch("mailshift.utils.hardware.get_system_info")
 def test_calculate_optimal_workers_uses_gpu_branch_for_amd(mock_get_system_info):
     info = type(
         "SysInfo",
@@ -163,7 +163,7 @@ def test_calculate_optimal_workers_uses_gpu_branch_for_amd(mock_get_system_info)
     workers = calculate_optimal_workers("qwen3.5:2B", mode="pro")
 
     assert workers >= 2
-@patch("hardware.get_system_info")
+@patch("mailshift.utils.hardware.get_system_info")
 def test_calculate_optimal_workers_manual_override(mock_get_system_info):
     info = type(
         "SysInfo",

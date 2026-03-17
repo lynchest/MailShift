@@ -1,5 +1,5 @@
-"""
-analyzer.py – Email analysis modules (re-exports for backwards compatibility).
+﻿"""
+analyzer.py | Email analysis modules (re-exports for backwards compatibility).
 """
 
 from fast_analyzer import fast_analyze

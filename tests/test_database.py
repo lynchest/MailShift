@@ -2,15 +2,15 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from models import MailMeta
-import database
+from mailshift.models.models import MailMeta
+from mailshift.db import database
 
 
 @pytest.fixture
 def mock_db_file(tmp_path):
     """Patch DB_FILE in database module to use a temporary file for tests."""
     db_path = tmp_path / "test_mailshift.db"
-    with patch("database.DB_FILE", db_path):
+    with patch("mailshift.db.database.DB_FILE", db_path):
         yield db_path
 
 

@@ -1,14 +1,14 @@
 import re
 import pytest
 from unittest.mock import patch
-from models import MailMeta
-import fast_analyzer
+from mailshift.models.models import MailMeta
+from mailshift.core.analyzers import fast as fast_analyzer
 
 
 @pytest.fixture
 def mock_patterns():
-    with patch("fast_analyzer.WHITELIST_PATTERN", re.compile("important|urgent", re.IGNORECASE)), \
-         patch("fast_analyzer.JUNK_PATTERN", re.compile("discount|offer", re.IGNORECASE)):
+    with patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", re.compile("important|urgent", re.IGNORECASE)), \
+         patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("discount|offer", re.IGNORECASE)):
         yield
 
 
@@ -44,8 +44,8 @@ def test_fast_analyze_no_match(mock_patterns):
 
 
 def test_fast_analyze_whitelist_priority_over_other_rules():
-    with patch("fast_analyzer.WHITELIST_PATTERN", re.compile("important", re.IGNORECASE)), \
-         patch("fast_analyzer.JUNK_PATTERN", re.compile("offer|no-reply", re.IGNORECASE)):
+    with patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", re.compile("important", re.IGNORECASE)), \
+         patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("offer|no-reply", re.IGNORECASE)):
         meta = MailMeta(
             uid="100",
             subject="Important verification code",
@@ -57,8 +57,8 @@ def test_fast_analyze_whitelist_priority_over_other_rules():
         assert result.reason == "whitelist:important"
 
 
-@patch("fast_analyzer.WHITELIST_PATTERN", None)
-@patch("fast_analyzer.JUNK_PATTERN", re.compile("no-reply|offer", re.IGNORECASE))
+@patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
+@patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("no-reply|offer", re.IGNORECASE))
 def test_fast_analyze_premium_expiry_is_kept():
     meta = MailMeta(
         uid="101",
@@ -71,8 +71,8 @@ def test_fast_analyze_premium_expiry_is_kept():
     assert result.reason.startswith("safe-guard:")
 
 
-@patch("fast_analyzer.WHITELIST_PATTERN", None)
-@patch("fast_analyzer.JUNK_PATTERN", re.compile("no-reply|offer", re.IGNORECASE))
+@patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
+@patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("no-reply|offer", re.IGNORECASE))
 def test_fast_analyze_verification_code_is_kept():
     meta = MailMeta(
         uid="102",
@@ -85,8 +85,8 @@ def test_fast_analyze_verification_code_is_kept():
     assert result.reason.startswith("safe-guard:")
 
 
-@patch("fast_analyzer.WHITELIST_PATTERN", None)
-@patch("fast_analyzer.JUNK_PATTERN", re.compile("no-reply|offer", re.IGNORECASE))
+@patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
+@patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("no-reply|offer", re.IGNORECASE))
 def test_fast_analyze_drive_storage_alert_is_kept():
     meta = MailMeta(
         uid="103",
@@ -99,8 +99,8 @@ def test_fast_analyze_drive_storage_alert_is_kept():
     assert result.reason.startswith("safe-guard:")
 
 
-@patch("fast_analyzer.WHITELIST_PATTERN", None)
-@patch("fast_analyzer.JUNK_PATTERN", re.compile("no-reply|noreply", re.IGNORECASE))
+@patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
+@patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("no-reply|noreply", re.IGNORECASE))
 def test_fast_analyze_noreply_sender_not_flagged():
     """Blacklist must not match 'no-reply' tokens that only appear in the sender address."""
     meta = MailMeta(
@@ -114,8 +114,8 @@ def test_fast_analyze_noreply_sender_not_flagged():
     assert result.reason == "no match"
 
 
-@patch("fast_analyzer.WHITELIST_PATTERN", None)
-@patch("fast_analyzer.JUNK_PATTERN", re.compile("indirim", re.IGNORECASE))
+@patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
+@patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("indirim", re.IGNORECASE))
 def test_fast_analyze_turkish_dotted_i_normalized():
     """Turkish İ (U+0130) must be folded to 'i' before matching."""
     meta = MailMeta(
@@ -129,8 +129,8 @@ def test_fast_analyze_turkish_dotted_i_normalized():
     assert result.reason.startswith("heuristic:")
 
 
-@patch("fast_analyzer.WHITELIST_PATTERN", None)
-@patch("fast_analyzer.JUNK_PATTERN", re.compile("offer|discount", re.IGNORECASE))
+@patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
+@patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("offer|discount", re.IGNORECASE))
 def test_fast_analyze_phishing_is_kept():
     """Phishing keywords in _ALWAYS_KEEP_PATTERN should return TUT to avoid false positives."""
     meta = MailMeta(

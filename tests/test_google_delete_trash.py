@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
-from config import AppConfig, Mode, Provider, build_imap_config
-from engine import MailEngine
+from mailshift.config.config import AppConfig, Mode, Provider, build_imap_config
+from mailshift.core.engine import MailEngine
 
 
 def _make_gmail_engine() -> MailEngine:

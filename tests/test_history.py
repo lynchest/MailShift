@@ -3,8 +3,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import history
-from models import MailMeta, ScanResult, ScanStats
+from mailshift.utils import history
+from mailshift.models.models import MailMeta, ScanResult, ScanStats
 
 
 @pytest.fixture

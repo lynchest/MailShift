@@ -1,8 +1,8 @@
 import json
 import pytest
 from pathlib import Path
-from models import MailMeta
-from fast_analyzer import fast_analyze
+from mailshift.models.models import MailMeta
+from mailshift.core.analyzers.fast import fast_analyze
 
 def load_dataset():
     dataset_path = Path(__file__).parent / "test_ai_dataset.json"

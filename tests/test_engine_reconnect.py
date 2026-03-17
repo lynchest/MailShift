@@ -2,8 +2,8 @@ from unittest.mock import MagicMock, patch
 
 import ssl
 
-from config import AppConfig, Mode, Provider, build_imap_config
-from engine import MailEngine
+from mailshift.config.config import AppConfig, Mode, Provider, build_imap_config
+from mailshift.core.engine import MailEngine
 
 
 def _make_app_cfg() -> AppConfig:
@@ -25,7 +25,7 @@ def test_delete_mails_reconnects_after_ssl_eof() -> None:
 
     engine._conn = original_conn
 
-    with patch("engine._connect", return_value=reconnected_conn) as mock_connect:
+    with patch("mailshift.core.engine._connect", return_value=reconnected_conn) as mock_connect:
         deleted = engine.delete_mails(["1", "2"])
 
     assert deleted == ["1", "2"]
@@ -46,7 +46,7 @@ def test_delete_mails_returns_empty_when_expunge_fails_after_retries() -> None:
 
     engine._conn = conn
 
-    with patch("engine._connect", return_value=reconnect_conn) as mock_connect:
+    with patch("mailshift.core.engine._connect", return_value=reconnect_conn) as mock_connect:
         deleted = engine.delete_mails(["1"])
 
     assert deleted == []

@@ -1,5 +1,5 @@
-"""
-models.py – Shared data classes for MailShift.
+﻿"""
+models.py | Shared data classes for MailShift.
 """
 
 from dataclasses import dataclass

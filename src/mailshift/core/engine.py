@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import email
 import email.header
@@ -14,9 +14,9 @@ from typing import Callable, Optional
 
 from bs4 import BeautifulSoup
 
-from models import MailMeta, ScanResult, ScanStats
-from config import AppConfig, IMAPConfig, Mode, Provider, RateLimitConfig
-from logger import log
+from ..models.models import MailMeta, ScanResult, ScanStats
+from ..config.config import AppConfig, IMAPConfig, Mode, Provider, RateLimitConfig
+from ..utils.logger import log
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ def _with_retry(
             if attempt < rl.max_retries:
                 log.warning(
                     f"Retry {attempt}/{rl.max_retries} for '{label}' "
-                    f"after {delay:.1f}s – {exc}"
+                    f"after {delay:.1f}s | {exc}"
                 )
                 time.sleep(delay)
                 delay *= 2  # exponential back-off
@@ -125,7 +125,7 @@ def _with_retry(
 
 
 # ---------------------------------------------------------------------------
-# Bulk IMAP fetch (single chunk, no retry — callers wrap with _with_retry)
+# Bulk IMAP fetch (single chunk, no retry â€” callers wrap with _with_retry)
 # ---------------------------------------------------------------------------
 
 def _fetch_mails_bulk(
@@ -235,7 +235,7 @@ class MailEngine:
         self._force_reconnect(label, attempt)
 
     def _force_reconnect(self, label: str, attempt: int) -> None:
-        """Reconnect unconditionally — used when the server returns an unexpected NO."""
+        """Reconnect unconditionally â€” used when the server returns an unexpected NO."""
         log.warning(
             f"Forcing IMAP reconnect during '{label}' (attempt {attempt})"
         )
@@ -276,7 +276,7 @@ class MailEngine:
         return uids[: self.cfg.scan_limit] if self.cfg.scan_limit else uids
 
     # ------------------------------------------------------------------
-    # Header / body fetching — rate-limit + retry + checkpoint
+    # Header / body fetching â€” rate-limit + retry + checkpoint
     # ------------------------------------------------------------------
 
     def fetch_headers_concurrent(
@@ -298,7 +298,7 @@ class MailEngine:
             interrupted run can continue from where it left off.
         """
         assert self._conn, "Not connected"
-        from database import mark_uids_fetched, get_fetched_uids, save_mails_cache
+        from ..db.database import mark_uids_fetched, get_fetched_uids, save_mails_cache
 
         need_body = False  # Optimization: fetch headers only by default; fetch bodies on-demand later
         rl = self._rl
@@ -370,7 +370,7 @@ class MailEngine:
         progress_cb: Optional[Callable[[MailMeta], None]] = None,
     ) -> list[MailMeta]:
         assert self._conn, "Not connected"
-        from database import save_mails_cache
+        from ..db.database import save_mails_cache
 
         rl = self._rl
         uids = [m.uid for m in mails]
@@ -452,9 +452,9 @@ class MailEngine:
         progress_cb: Optional[Callable[[ScanResult], None]] = None,
         cancel_event: Optional[threading.Event] = None,
     ) -> tuple[list[ScanResult], ScanStats]:
-        from fast_analyzer import fast_analyze
-        from pro_analyzer import pro_analyze
-        from hardware import calculate_optimal_workers
+        from .analyzers.fast import fast_analyze
+        from .analyzers.pro import pro_analyze
+        from ..utils.hardware import calculate_optimal_workers
 
         stats = ScanStats()
         stats_lock = Lock()
@@ -542,7 +542,7 @@ class MailEngine:
             cb(res)
 
     # ------------------------------------------------------------------
-    # Deletion / trash — rate-limit + retry on every chunk
+    # Deletion / trash â€” rate-limit + retry on every chunk
     # ------------------------------------------------------------------
 
     def delete_mails(

@@ -1,5 +1,5 @@
 import pytest
-from models import MailMeta, ScanResult, ScanStats
+from mailshift.models.models import MailMeta, ScanResult, ScanStats
 
 
 def test_mail_meta_defaults():
