@@ -272,7 +272,7 @@ KRİTİK SIL (KESİNLİKLE SİLİNECEKLER):
 
 2. GAMIFICATION/STRATEJİ: "Serin 45 güne ulaştı", "Duo seni özledi", "Rozet kazandın", "Tamamla kazan".
 
-3. SADAKAT: "Elite oldun", "Puanların siliniyor", "VIP davet".
+3. SADAKAT: "Puanların siliniyor", "VIP davet".
 
 4. BÜLTEN VE ÖZET (newsletter): "Weekly Tech Digest", "Daily Digest", "Topluluğu Bülteni", "Haftalık Bülten".
 
@@ -284,7 +284,7 @@ KRİTİK TUT (ASLA SİLME):
 
 1. KİŞİSEL: Arkadaş, aile, iş arkadaşı veya doğrudan sana yazılan özel mesajlar.
 
-2. Operasyonel: Fatura, dekont, banka ekstresi, şifre sıfırlama, OTP, kargo takibi, resmi vergi bildirimi.
+2. Operasyonel: Fatura, dekont, banka ekstresi, şifre sıfırlama, OTP, kargo takibi, resmi vergi bildirimi, statü güncellemeleri ("Trendyol Elite", "Elite oldun").
 
 3. Kritik: Abonelik iptali veya ücretli yenileme uyarısı.
 

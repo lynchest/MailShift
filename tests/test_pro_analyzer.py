@@ -8,7 +8,7 @@ from mailshift.config.config import OllamaConfig, DEFAULT_SYSTEM_PROMPT
 
 
 def test_check_ollama_health_success():
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         
@@ -22,7 +22,7 @@ def test_check_ollama_health_success():
 
 
 def test_check_ollama_health_connection_error():
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         
@@ -39,7 +39,7 @@ def test_ollama_provider_analyze():
     
     meta = MailMeta(uid="1", subject="Buy now", sender="test@test.com", body_preview="Sale sale sale")
     
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
 
@@ -150,12 +150,12 @@ def test_ollama_provider_uses_dynamic_runtime_options():
         "use_flash_attn": True,
     }
 
-    with patch("pro_analyzer._select_ollama_runtime_options", return_value=expected_options):
+    with patch("mailshift.core.analyzers.pro._select_ollama_runtime_options", return_value=expected_options):
         provider = pro_analyzer.OllamaProvider(cfg)
 
     meta = MailMeta(uid="1", subject="Buy now", sender="test@test.com", body_preview="Sale sale sale")
 
-    with patch("pro_analyzer._get_session") as mock_session_fn:
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
         mock_session = MagicMock()
         mock_session_fn.return_value = mock_session
         mock_resp = MagicMock()
@@ -189,8 +189,8 @@ def test_pro_analyze_always_routes_to_provider_even_for_known_patterns():
 def test_default_prompt_contains_typical_examples():
     expected_phrases = [
         "Sen bir e-posta temizleme asistanısın",
-        "SIL (Silinecekler - Gereksiz)",
-        "TUT (Tutulacaklar - Önemli)",
+        "KRİTİK SIL (KESİNLİKLE SİLİNECEKLER):",
+        "KRİTİK TUT (ASLA SİLME):",
         "JSON formatında cevap ver",
     ]
 
