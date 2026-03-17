@@ -1,12 +1,19 @@
 import json
 import time
+import sys
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ui import console
-from models import MailMeta
-from config import OllamaConfig
-from pro_analyzer import pro_analyze, check_ollama_health
+# Add 'src' to sys.path so we can import 'mailshift'
+root_dir = Path(__file__).parent.parent.absolute()
+src_path = str(root_dir / "src")
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+
+from mailshift.ui.styles import console
+from mailshift.models.models import MailMeta
+from mailshift.config.config import OllamaConfig
+from mailshift.core.analyzers.pro import pro_analyze, check_ollama_health
 
 NUM_WORKERS = 4
 

@@ -15,14 +15,20 @@ Reports:
 import argparse
 import json
 import time
+import sys
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ui import console
-from models import MailMeta, ScanResult
-from config import OllamaConfig, LMStudioConfig
-from fast_analyzer import fast_analyze
-from pro_analyzer import pro_analyze, check_ollama_health, check_lm_studio_health
+# Add 'src' to sys.path so we can import 'mailshift'
+src_path = str(Path(__file__).parent.parent.absolute() / "src")
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+
+from mailshift.ui.styles import console
+from mailshift.models.models import MailMeta, ScanResult
+from mailshift.config.config import OllamaConfig, LMStudioConfig
+from mailshift.core.analyzers.fast import fast_analyze
+from mailshift.core.analyzers.pro import pro_analyze, check_ollama_health, check_lm_studio_health
 
 NUM_WORKERS = 4
 RESULTS_FILE = Path(__file__).parent / "eval_pro_mode_results.txt"
