@@ -127,50 +127,33 @@ _WHITELIST_ESCAPED = [re.escape(k) for k in WHITELIST_KEYWORDS_LOWER]
 JUNK_PATTERN = re.compile('|'.join(_JUNK_ESCAPED), re.IGNORECASE) if _JUNK_ESCAPED else None
 WHITELIST_PATTERN = re.compile('|'.join(_WHITELIST_ESCAPED), re.IGNORECASE) if _WHITELIST_ESCAPED else None
 DEFAULT_SYSTEM_PROMPT = """
-Sen bir e-posta temizleme asistanısın. Görevin, gelen kutusundaki gereksiz (junk/spam/marketing) e-postaları SIL (Sil) veya TUT (Tut) olarak sınıflandırmaktır.
+Sen bir e-posta temizleme asistanısın. E-postaları SIL veya TUT olarak sınıflandır.
 
 JSON formatında cevap ver: {"decision": "SIL" | "TUT", "reason": "kısa açıklama"}
 
-TUT (Tutulacaklar - Önemli):
-1. Kişisel: Gerçek kişilerden gelen mesajlar ("Annenden", "Mehmet Bey'den").
-2. İş/Kariyer: İş başvurusu güncellemeleri, mülakat davetleri, teklif mektupları.
-3. Finans/Resmi: Banka ekstreleri, faturalar, vergi ödemeleri, resmi kurum (e-devlet, belediye su/elektrik) bildirimleri.
-4. Güvenlik: Doğrulama kodları (OTP), şifre sıfırlama, güvenlik uyarıları.
-5. İş Araçları: GitHub PR bildirimleri, Jira kritik hatalar, Slack direkt mesaj bildirimleri, Drive paylaşımları.
-6. Ödemeli/Değerli İçerik: Substack/Medium gibi gerçekten takip ettiğin yazarların ÜCRETSİZ içerikleri. "Yeni ücretli yazı", "Premium içerik erişimi", "Ücretli abonelik" gibi ücretli içerik bildirimleri/pazarlama e-postaları -> SIL.
+KRİTİK SIL (KESİNLİKLE SİLİNECEKLER):
+1. PAZARLAMA/SATIŞ: İndirim, kampanya, sepet uyarısı ("Sepetinde ürün var"), indirim kodu.
+2. GAMIFICATION/STRATEJİ: "Serin 45 güne ulaştı", "Duo seni özledi", "Rozet kazandın", "Tamamla kazan".
+3. SADAKAT: "Elite oldun", "Puanların siliniyor", "VIP davet".
+4. BÜLTEN VE ÖZET (newsletter): "Weekly Tech Digest", "Daily Digest", "Topluluğu Bülteni", "Haftalık Bülten".
+5. RESMİ AMA ÖNEMSİZ: Belediye etkinlikleri (İftar, kutlama), TÜİK gibi kurumların sadece veri yayınlama duyuruları.
+6. SUBSTACK: Eğer "Yeni ücretli yazı" başlığı olsa bile içerik bir kişisel iletişim değil toplu bültense SIL yap.
 
-SIL (Silinecekler - Gereksiz):
-1. Pazarlama ve Promosyon: "İndirim", "Kampanya", "%50 fırsat", "Sadece sana özel", "VIP", "Son şans", "Kaçırma".
-2. Haber Bültenleri (Newsletter): "Weekly Tech Digest", "Haftalık Bülten", "Önemli Gelişmeler" gibi genel toplu gönderimler.
-3. Sosyal Medya/Platform Bildirimleri: "X kişisi yeni video yükledi", "Youtube: Abone olduğun kanal...", "Yeni takipçi", "Trendler", "Popüler konular".
-4. Onboarding/Hoşgeldin: "MailShift'e Hoşgeldin", "Hadi Başlayalım", "Profilini Tamamla".
-5. Otomatik Duyurular: İftar programları, genel etkinlik duyuruları, anketler.
-6. Referral/Davet Pazarlaması: "Arkadaşını davet et", "Seni bekliyor", "Davet bonusu", "X TL kazan", "Profilini tamamla, X TL kazan", "Puan kazan" gibi arkadaş referans programları ve gamification (oyunlaştırma) e-postaları.
-7. Platform Önerileri: Netflix/Spotify/YouTube dizi/film/şarkı önerileri, Udemy/Coursera kurs önerileri, uygulama önerileri. Bunlar kişisel değil otomatik öneri sistemleridir.
-8. Ücretsiz Deneme/Seviye Testi: "Ücretsiz deneme", "Free trial", "Ücretsiz seviye testi", "Premium deneme süresi" gibi müşteri çekme amaçlı teknikler.
-
-KRİTİK KURALLAR:
-1. Eğer e-posta bir ürünü satmaya, bir siteye geri çağırma (engagement) veya genel bir bilgi (digest) vermeye çalışıyorsa SIL kararını ver.
-2. "Ücretsiz", "kurs önerisi", "yeni dizi", "profilini tamamla" gibi ifadeler iş başvurusu veya kişisel mesaj DEĞİLDİR. Bunlar platformların kullanıcıyı geri çağırma ve pazarlama stratejileridir — SIL olarak işaretle.
-3. Ödül, para veya puan vaadiyle profil tamamlatma veya arkadaş davet etme e-postaları her zaman pazarlama kategorisindedir ve SIL olmalıdır.
-4. EĞER AÇIKLAMANIZDA "pazarlama stratejisi", "geri çağırma", "kampanya" veya "promosyon" ifadelerini kullanıyorsanız, kararınız MUTLAKA "SIL" olmalıdır. Kararsız kalırsanız SIL tarafında olun.
+TUT (SADECE BUNLAR):
+1. Kişisel: Gerçek kişiden gelen mesaj, direkt sana yönelik @mention veya yorum yanıtı.
+2. Operasyonel: Fatura, dekont, banka ekstresi, şifre sıfırlama, OTP, kargo takibi, resmi vergi bildirimi.
+3. Kritik: Abonelik iptali veya ücretli yenileme uyarısı.
 
 ÖRNEKLER:
-- "Annenden: Market listesi" -> TUT
-- "Başvurunuz alındı - Trendyol" -> TUT
-- "Weekly Python Tips" -> SIL
-- "Get 50% off - Nike" -> SIL
-- "Yeni takipçiniz var" -> SIL
-- "Doğrula kodu: 123456" -> TUT
-- "Ramazan İftar Programı Duyurusu" -> SIL
-- "Mailchimp: Hoşgeldiniz" -> SIL
-- "Ücretsiz Premium Deneme – Sadece 3 Gün!" -> SIL
-- "Netflix: Yeni dizi önerisi" -> SIL
-- "Udemy: Yeni kurs önerisi" -> SIL
-- "Arkadaşın Seni Bekliyor – 200 TL Çek" -> SIL
-- "Profilini Tamamla, 100 TL Kazan" -> SIL
-
-E-posta şudur:
+- "Weekly Tech Digest" -> SIL (Bülten)
+- "Haftalık Bülten: Python Topluluğu" -> SIL (Bülten)
+- "Belediye: Ramazan iftar programı" -> SIL (Resmi/Genel Duyuru)
+- "TÜİK: Enflasyon verisi yayımlandı" -> SIL (Veri bülteni)
+- "Duolingo: Serin 45 güne ulaştı!" -> SIL (Gamification)
+- "Migros Hemen: Sepetinde ürünler var" -> SIL (Satış)
+- "IKEA Aile Puanlarınız siliniyor!" -> SIL (Sadakat)
+- "Substack: Yeni ücretli yazı" -> SIL (Toplu gönderim/Bülten)
+- "Profilini Tamamla, 100 TL Kazan" -> SIL (Strateji)
 """
 
 
@@ -178,11 +161,12 @@ class OllamaConfig(BaseModel):
     """Settings for the local Ollama LLM endpoint."""
 
     base_url: str = "http://localhost:11434"
-    model: str = "qwen3.5:0.8B"
+    model: str = "Qwen3.5:0.8B"
     timeout: int = 60
     max_body_chars: int = 500
 
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    use_think: bool = False
 
     model_config = ConfigDict(frozen=True)
 
@@ -196,6 +180,7 @@ class LMStudioConfig(BaseModel):
     max_body_chars: int = 500
 
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    use_think: bool = False
 
     model_config = ConfigDict(frozen=True)
 

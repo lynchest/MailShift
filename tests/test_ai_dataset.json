@@ -1431,172 +1431,972 @@
         "expected_decision": "TUT",
         "category": "subscription"
     },
-  {
-    "id": "180",
-    "subject": "Haftalık Bülten: Python Türkiye Topluluğu",
-    "sender": "bulten@python.org.tr",
-    "body_preview": "Bu hafta Ankara meetup'ı 22 Mart'ta. Katılım linki aşağıda.",
-    "expected_decision": "TUT",
-    "category": "newsletter"
-  },
-  {
-    "id": "181",
-    "subject": "Getir: Sepetinde unuttuğun ürünler var",
-    "sender": "bildirim@getir.com",
-    "body_preview": "Yoğurt, ekmek ve muz hâlâ sepette bekliyor. Şimdi tamamla, 15 TL indirim kazan.",
-    "expected_decision": "SIL",
-    "category": "promotion"
-  },
-  {
-    "id": "182",
-    "subject": "Hacettepe: Poliklinik randevu onayınız",
-    "sender": "randevu@hacettepe.edu.tr",
-    "body_preview": "22 Mart 2026 10:45 – Kardiyoloji – Prof. Dr. Ayhan Yılmaz",
-    "expected_decision": "TUT",
-    "category": "health"
-  },
-  {
-    "id": "183",
-    "subject": "Trendyol: Sepetindeki ürünler stokta azaldı",
-    "sender": "bildirim@trendyol.com",
-    "body_preview": "Sadece 2 adet kaldı! Hemen satın al.",
-    "expected_decision": "SIL",
-    "category": "promotion"
-  },
-  {
-    "id": "184",
-    "subject": "Ankara Büyükşehir: Kar yağışı uyarısı",
-    "sender": "bildirim@ankara.bel.tr",
-    "body_preview": "Yarın sabah 03:00–11:00 arası yoğun kar bekleniyor. Dikkatli olun.",
-    "expected_decision": "TUT",
-    "category": "transactional"
-  },
-  {
-    "id": "185",
-    "subject": "Canva: Yeni şablonlar eklendi",
-    "sender": "hello@canva.com",
-    "body_preview": "2026 bahar temalı 300+ ücretsiz şablon seni bekliyor!",
-    "expected_decision": "SIL",
-    "category": "promotion"
-  },
-  {
-    "id": "186",
-    "subject": "Ziraat Bankası: Kredi kartı ekstreniz hazır",
-    "sender": "ekstre@ziraatbank.com.tr",
-    "body_preview": "Mart 2026 dönemi ekstreniz e-Posta ile gönderildi.",
-    "expected_decision": "TUT",
-    "category": "transactional"
-  },
-  {
-    "id": "187",
-    "subject": "Strava: Haftalık spor özeti",
-    "sender": "no-reply@strava.com",
-    "body_preview": "Bu hafta 42 km koştun, en iyi derecen 5:12/km!",
-    "expected_decision": "TUT",
-    "category": "notification"
-  },
-  {
-    "id": "188",
-    "subject": "Boyner: Yeni koleksiyon için ön izleme",
-    "sender": "kampanya@boyner.com.tr",
-    "body_preview": "Sana özel erken erişim: yarın sabah 08:00'de başlıyor.",
-    "expected_decision": "SIL",
-    "category": "promotion"
-  },
-  {
-    "id": "189",
-    "subject": "e-Devlet: Yeni gelen evrak – Tapu bilgisi",
-    "sender": "noreply@turkiye.gov.tr",
-    "body_preview": "Taşınmaz mal beyanınız güncellendi. Görüntülemek için tıklayın.",
-    "expected_decision": "TUT",
-    "category": "transactional"
-  },
-  {
-    "id": "190",
-    "subject": "Duolingo: 7 günlük seri kırılmak üzere!",
-    "sender": "hello@duolingo.com",
-    "body_preview": "Bugün dersini yapmazsan serin bitecek 😢",
-    "expected_decision": "SIL",
-    "category": "notification"
-  },
-  {
-    "id": "191",
-    "subject": "Vergi Dairesi: 2026 motorlu taşıtlar vergisi",
-    "sender": "hatirlatma@gib.gov.tr",
-    "body_preview": "2026 MTV 1. taksit ödeme süresi 31 Mart'ta bitiyor.",
-    "expected_decision": "TUT",
-    "category": "transactional"
-  },
-  {
-    "id": "192",
-    "subject": "Migros Sanal Market: Sana özel sürpriz indirim",
-    "sender": "kampanya@migros.com.tr",
-    "body_preview": "Bugün sadece sana: 150 TL ve üzeri alışverişte %25 indirim.",
-    "expected_decision": "SIL",
-    "category": "promotion"
-  },
-  {
-    "id": "193",
-    "subject": "LinkedIn: Profil görüntülenmelerin arttı",
-    "sender": "notifications-noreply@linkedin.com",
-    "body_preview": "Son 7 günde profilin 87 kez görüntülendi.",
-    "expected_decision": "SIL",
-    "category": "notification"
-  },
-  {
-    "id": "194",
-    "subject": "PTT: Gönderi takip – YT987654321TR",
-    "sender": "bildirim@ptt.gov.tr",
-    "body_preview": "Gönderiniz Ankara Kurtuluş şubesine ulaştı.",
-    "expected_decision": "TUT",
-    "category": "transactional"
-  },
-  {
-    "id": "195",
-    "subject": "Notion: Takım sayfan güncellendi",
-    "sender": "no-reply@notion.so",
-    "body_preview": "Ayşe yeni '2026 OKR' sayfasını paylaştı.",
-    "expected_decision": "TUT",
-    "category": "work"
-  },
-  {
-    "id": "196",
-    "subject": "Trendyol Go: Yakınında indirimli restoranlar",
-    "sender": "kampanya@trendyol.com",
-    "body_preview": "Çankaya'da şu an 20+ restoran %40'a varan indirimde.",
-    "expected_decision": "SIL",
-    "category": "promotion"
-  },
-  {
-    "id": "197",
-    "subject": "Turkcell: Hat borcu hatırlatması",
-    "sender": "fatura@turkcell.com.tr",
-    "body_preview": "Mart faturan 289,90 TL. Son ödeme 25 Mart.",
-    "expected_decision": "TUT",
-    "category": "transactional"
-  },
-  {
-    "id": "198",
-    "subject": "Goodreads: Arkadaşın yeni kitap ekledi",
-    "sender": "no-reply@goodreads.com",
-    "body_preview": "Ayşe 'Dune Messiah' kitabını okuma listesine ekledi.",
-    "expected_decision": "SIL",
-    "category": "social"
-  },
-  {
-    "id": "199",
-    "subject": "E-Devlet: Ehliyet yenileme randevusu açıldı",
-    "sender": "noreply@turkiye.gov.tr",
-    "body_preview": "Ehliyet yenileme randevuları 1 Nisan'dan itibaren alınabilir.",
-    "expected_decision": "TUT",
-    "category": "transactional"
-  },
-  {
-    "id": "200",
-    "subject": "Starbucks: Bugün double star günü!",
-    "sender": "offers@starbucks.com.tr",
-    "body_preview": "Bugün aldığın her içecekte 2× yıldız kazan.",
-    "expected_decision": "SIL",
-    "category": "promotion"
-  }
+    {
+        "id": "180",
+        "subject": "Haftalık Bülten: Python Türkiye Topluluğu",
+        "sender": "bulten@python.org.tr",
+        "body_preview": "Bu hafta Ankara meetup'ı 22 Mart'ta. Katılım linki aşağıda.",
+        "expected_decision": "SIL",
+        "category": "newsletter"
+    },
+    {
+        "id": "181",
+        "subject": "Getir: Sepetinde unuttuğun ürünler var",
+        "sender": "bildirim@getir.com",
+        "body_preview": "Yoğurt, ekmek ve muz hâlâ sepette bekliyor. Şimdi tamamla, 15 TL indirim kazan.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "182",
+        "subject": "Hacettepe: Poliklinik randevu onayınız",
+        "sender": "randevu@hacettepe.edu.tr",
+        "body_preview": "22 Mart 2026 10:45 – Kardiyoloji – Prof. Dr. Ayhan Yılmaz",
+        "expected_decision": "TUT",
+        "category": "health"
+    },
+    {
+        "id": "183",
+        "subject": "Trendyol: Sepetindeki ürünler stokta azaldı",
+        "sender": "bildirim@trendyol.com",
+        "body_preview": "Sadece 2 adet kaldı! Hemen satın al.",
+        "expected_decision": "TUT",
+        "category": "promotion"
+    },
+    {
+        "id": "184",
+        "subject": "Ankara Büyükşehir: Kar yağışı uyarısı",
+        "sender": "bildirim@ankara.bel.tr",
+        "body_preview": "Yarın sabah 03:00–11:00 arası yoğun kar bekleniyor. Dikkatli olun.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "185",
+        "subject": "Canva: Yeni şablonlar eklendi",
+        "sender": "hello@canva.com",
+        "body_preview": "2026 bahar temalı 300+ ücretsiz şablon seni bekliyor!",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "186",
+        "subject": "Ziraat Bankası: Kredi kartı ekstreniz hazır",
+        "sender": "ekstre@ziraatbank.com.tr",
+        "body_preview": "Mart 2026 dönemi ekstreniz e-Posta ile gönderildi.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "187",
+        "subject": "Strava: Haftalık spor özeti",
+        "sender": "no-reply@strava.com",
+        "body_preview": "Bu hafta 42 km koştun, en iyi derecen 5:12/km!",
+        "expected_decision": "TUT",
+        "category": "notification"
+    },
+    {
+        "id": "188",
+        "subject": "Boyner: Yeni koleksiyon için ön izleme",
+        "sender": "kampanya@boyner.com.tr",
+        "body_preview": "Sana özel erken erişim: yarın sabah 08:00'de başlıyor.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "189",
+        "subject": "e-Devlet: Yeni gelen evrak – Tapu bilgisi",
+        "sender": "noreply@turkiye.gov.tr",
+        "body_preview": "Taşınmaz mal beyanınız güncellendi. Görüntülemek için tıklayın.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "190",
+        "subject": "Duolingo: 7 günlük seri kırılmak üzere!",
+        "sender": "hello@duolingo.com",
+        "body_preview": "Bugün dersini yapmazsan serin bitecek 😢",
+        "expected_decision": "SIL",
+        "category": "notification"
+    },
+    {
+        "id": "191",
+        "subject": "Vergi Dairesi: 2026 motorlu taşıtlar vergisi",
+        "sender": "hatirlatma@gib.gov.tr",
+        "body_preview": "2026 MTV 1. taksit ödeme süresi 31 Mart'ta bitiyor.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "192",
+        "subject": "Migros Sanal Market: Sana özel sürpriz indirim",
+        "sender": "kampanya@migros.com.tr",
+        "body_preview": "Bugün sadece sana: 150 TL ve üzeri alışverişte %25 indirim.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "193",
+        "subject": "LinkedIn: Profil görüntülenmelerin arttı",
+        "sender": "notifications-noreply@linkedin.com",
+        "body_preview": "Son 7 günde profilin 87 kez görüntülendi.",
+        "expected_decision": "TUT",
+        "category": "notification"
+    },
+    {
+        "id": "194",
+        "subject": "PTT: Gönderi takip – YT987654321TR",
+        "sender": "bildirim@ptt.gov.tr",
+        "body_preview": "Gönderiniz Ankara Kurtuluş şubesine ulaştı.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "195",
+        "subject": "Notion: Takım sayfan güncellendi",
+        "sender": "no-reply@notion.so",
+        "body_preview": "Ayşe yeni '2026 OKR' sayfasını paylaştı.",
+        "expected_decision": "TUT",
+        "category": "work"
+    },
+    {
+        "id": "196",
+        "subject": "Trendyol Go: Yakınında indirimli restoranlar",
+        "sender": "kampanya@trendyol.com",
+        "body_preview": "Çankaya'da şu an 20+ restoran %40'a varan indirimde.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "197",
+        "subject": "Turkcell: Hat borcu hatırlatması",
+        "sender": "fatura@turkcell.com.tr",
+        "body_preview": "Mart faturan 289,90 TL. Son ödeme 25 Mart.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "198",
+        "subject": "Goodreads: Arkadaşın yeni kitap ekledi",
+        "sender": "no-reply@goodreads.com",
+        "body_preview": "Ayşe 'Dune Messiah' kitabını okuma listesine ekledi.",
+        "expected_decision": "TUT",
+        "category": "social"
+    },
+    {
+        "id": "199",
+        "subject": "E-Devlet: Ehliyet yenileme randevusu açıldı",
+        "sender": "noreply@turkiye.gov.tr",
+        "body_preview": "Ehliyet yenileme randevuları 1 Nisan'dan itibaren alınabilir.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "200",
+        "subject": "Starbucks: Bugün double star günü!",
+        "sender": "offers@starbucks.com.tr",
+        "body_preview": "Bugün aldığın her içecekte 2× yıldız kazan.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "201",
+        "subject": "Hepsiburada: Sepetindeki ürün indirime girdi",
+        "sender": "kampanya@hepsiburada.com",
+        "body_preview": "Aldığın ayakkabı şimdi %35 daha ucuz. Hemen tamamla!",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "202",
+        "subject": "e-Devlet: SGK emeklilik başvuru durumu",
+        "sender": "noreply@turkiye.gov.tr",
+        "body_preview": "Başvurunuz inceleniyor. Son durum için giriş yapın.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "203",
+        "subject": "Yemeksepeti: Bugün %50'ye varan indirim",
+        "sender": "kampanya@yemeksepeti.com",
+        "body_preview": "Ankara restoranlarında flash kampanya başladı.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "204",
+        "subject": "Ankara Eczacı Odası: Reçete yenileme uyarısı",
+        "sender": "bilgi@eczaciodasi.org.tr",
+        "body_preview": "Kronik ilaç raporunuz 45 gün içinde yenilenmeli.",
+        "expected_decision": "TUT",
+        "category": "health"
+    },
+    {
+        "id": "205",
+        "subject": "Notion: Sayfaya yeni yorum eklendi",
+        "sender": "no-reply@notion.so",
+        "body_preview": "Ekip arkadaşın 'Q2 hedefleri' sayfasına yorum yazdı.",
+        "expected_decision": "TUT",
+        "category": "work"
+    },
+    {
+        "id": "206",
+        "subject": "Getir Çarşı: Yakınındaki marketlerde indirim",
+        "sender": "bildirim@getir.com",
+        "body_preview": "Migros Çankaya'da bugün 100 TL üzeri %20 indirim.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "207",
+        "subject": "Turk Telekom: İnternet faturası hazır",
+        "sender": "fatura@turktelekom.com.tr",
+        "body_preview": "Mart 2026 faturanız 389,90 TL. Ödeme için tıklayın.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "208",
+        "subject": "Strava: Yeni rekor! En hızlı 5 km",
+        "sender": "no-reply@strava.com",
+        "body_preview": "Bugün 21:48 ile kişisel en iyi süreni kırdın.",
+        "expected_decision": "TUT",
+        "category": "notification"
+    },
+    {
+        "id": "209",
+        "subject": "LC Waikiki: Yeni sezon ön sipariş",
+        "sender": "ozel@lcwaikiki.com",
+        "body_preview": "Sana özel: 3 gün erken erişim + %10 ekstra indirim.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "210",
+        "subject": "MHRS: Randevu 2 gün sonra",
+        "sender": "noreply@mhrs.gov.tr",
+        "body_preview": "23 Mart 2026 14:15 – Nöroloji – Prof. Dr. Selim Kaya",
+        "expected_decision": "TUT",
+        "category": "health"
+    },
+    {
+        "id": "211",
+        "subject": "Spotify: Yeni çalma listesi önerisi",
+        "sender": "info@spotify.com",
+        "body_preview": "Ankara akşamları için özel hazırlanmış 50 şarkı.",
+        "expected_decision": "SIL",
+        "category": "notification"
+    },
+    {
+        "id": "212",
+        "subject": "VakıfBank: Kredi kartı limit bilgilendirme",
+        "sender": "noreply@vakifbank.com.tr",
+        "body_preview": "Limitiniz 35.000 TL'ye yükseltildi.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "213",
+        "subject": "Trendyol: Arkadaşın seni davet etti",
+        "sender": "davet@trendyol.com",
+        "body_preview": "Davet kodunu kullan, 75 TL indirim kazan.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "214",
+        "subject": "e-Devlet: Araç muayene süresi doluyor",
+        "sender": "noreply@turkiye.gov.tr",
+        "body_preview": "06 ABC 123 plakalı aracınızın muayene süresi 30 gün kaldı.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "215",
+        "subject": "Duolingo: Serin 45 güne ulaştı!",
+        "sender": "hello@duolingo.com",
+        "body_preview": "Tebrikler! 45 günlük seri rekorun devam ediyor.",
+        "expected_decision": "SIL",
+        "category": "notification"
+    },
+    {
+        "id": "216",
+        "subject": "ASKİ: Su kesintisi planı – Çankaya",
+        "sender": "bildirim@aski.gov.tr",
+        "body_preview": "Yarın 22:00–06:00 Ümitköy Mah. su kesintisi olacak.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "217",
+        "subject": "Medium: Yeni takip önerileri",
+        "sender": "notifications@medium.com",
+        "body_preview": "Ankara'da yaşayan teknoloji yazarlarını takip et.",
+        "expected_decision": "SIL",
+        "category": "newsletter"
+    },
+    {
+        "id": "218",
+        "subject": "Garanti BBVA: Hesap hareketi bildirimi",
+        "sender": "noreply@garanti.com.tr",
+        "body_preview": "Hesabınıza 2.450 TL giriş yapıldı (maaş).",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "219",
+        "subject": "Migros: Sadakat puanı kazanma fırsatı",
+        "sender": "kampanya@migros.com.tr",
+        "body_preview": "Bugün 200 TL alışverişe 500 Money puanı hediye.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "220",
+        "subject": "LinkedIn Learning: Kurs bitirme tarihi yaklaşıyor",
+        "sender": "notifications-noreply@linkedin.com",
+        "body_preview": "'Python Data Analysis' kursu 3 gün içinde bitiyor.",
+        "expected_decision": "TUT",
+        "category": "education"
+    },
+    {
+        "id": "221",
+        "subject": "PTT Kargo: Teslimat için adres onayı",
+        "sender": "bildirim@pttkargo.gov.tr",
+        "body_preview": "Gönderi yarın teslim edilecek. Adres doğru mu?",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "222",
+        "subject": "Defacto: Yeni indirim kodu sana özel",
+        "sender": "kampanya@defacto.com.tr",
+        "body_preview": "Kod: LYN2026 → %25 ekstra indirim.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "223",
+        "subject": "e-Nabız: Yeni tahlil sonucu yüklendi",
+        "sender": "noreply@saglik.gov.tr",
+        "body_preview": "Tiroid fonksiyon testi sonucu sisteme eklendi.",
+        "expected_decision": "TUT",
+        "category": "health"
+    },
+    {
+        "id": "224",
+        "subject": "YouTube: Abone olduğun kanal canlı yayında",
+        "sender": "no-reply@youtube.com",
+        "body_preview": "Tech Ankara şu an canlı: '2026 GPU Trendleri'",
+        "expected_decision": "SIL",
+        "category": "notification"
+    },
+    {
+        "id": "225",
+        "subject": "Ziraat Katılım: Katılım hesabı kar payı",
+        "sender": "noreply@ziraatkatilim.com.tr",
+        "body_preview": "Mart 2026 kar payınız 1.245 TL olarak yansıdı.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "226",
+        "subject": "GetirSu: Su siparişin yolda",
+        "sender": "no-reply@getir.com",
+        "body_preview": "19 litre su siparişin 45 dk içinde teslim edilecek.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "227",
+        "subject": "Patreon: Yeni tier avantajları",
+        "sender": "no-reply@patreon.com",
+        "body_preview": "Destek seviyenizi yükseltirseniz özel Discord kanalı açılacak.",
+        "expected_decision": "SIL",
+        "category": "subscription"
+    },
+    {
+        "id": "228",
+        "subject": "Ankara Emniyet: Plakanıza işlem yapıldı",
+        "sender": "ceza@egm.gov.tr",
+        "body_preview": "Park yasağı ihlali – 387 TL ceza yazıldı.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "229",
+        "subject": "Udemy: 'Sana özel' kurs indirimi",
+        "sender": "promotions@udemy.com",
+        "body_preview": "Profiline göre seçildi: %92 indirim – 89 TL",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "230",
+        "subject": "Google Calendar: Yarınki toplantı 10:00",
+        "sender": "calendar-notification@google.com",
+        "body_preview": "Sprint Planning – Zoom linki ektedir.",
+        "expected_decision": "TUT",
+        "category": "work"
+    },
+    {
+        "id": "231",
+        "subject": "Boyner Club: Puanların yakında silinecek",
+        "sender": "kampanya@boyner.com.tr",
+        "body_preview": "3.240 puanınız 31 Mart'ta geçersiz olacak. Kullan!",
+        "expected_decision": "TUT",
+        "category": "promotion"
+    },
+    {
+        "id": "232",
+        "subject": "e-Devlet: Seçmen bilgi kağıdı hazır",
+        "sender": "noreply@turkiye.gov.tr",
+        "body_preview": "2026 yerel seçim seçmen kağıdınız indirilebilir.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "233",
+        "subject": "Instagram: Yakınlardaki hikayeler",
+        "sender": "no-reply@mail.instagram.com",
+        "body_preview": "Çankaya'daki arkadaşlarının 7 yeni hikayesi var.",
+        "expected_decision": "SIL",
+        "category": "social"
+    },
+    {
+        "id": "234",
+        "subject": "Turkcell Superonline: Yeni kampanya",
+        "sender": "kampanya@superonline.net",
+        "body_preview": "500 Mbps + Netflix hediye – sadece bu ay.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "235",
+        "subject": "Hacettepe: Tahlil sonucu erişime açıldı",
+        "sender": "sonuc@hacettepe.edu.tr",
+        "body_preview": "Dünkü kan tahlili sonuçlarınız portalda.",
+        "expected_decision": "TUT",
+        "category": "health"
+    },
+    {
+        "id": "236",
+        "subject": "Trendyol Jet: 30 dk teslimat fırsatı",
+        "sender": "kampanya@trendyol.com",
+        "body_preview": "Şu an sipariş verirsen 30 dk içinde kapında.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "237",
+        "subject": "SGK: 4A aylık prim bildirgesi",
+        "sender": "bilgi@sgk.gov.tr",
+        "body_preview": "Mart 2026 prim bildirgeniz sisteme yüklendi.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "238",
+        "subject": "Netflix: İzlemeye devam?",
+        "sender": "info@netflix.com",
+        "body_preview": "'Dark' dizisinin 3. sezonu kaldığı yerden devam edebilir.",
+        "expected_decision": "SIL",
+        "category": "notification"
+    },
+    {
+        "id": "239",
+        "subject": "Papara: Yeni para girişi",
+        "sender": "no-reply@papara.com",
+        "body_preview": "1.200 TL arkadaşından transfer aldın.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "240",
+        "subject": "Migros Hemen: Sepetinde ürünler var",
+        "sender": "bildirim@migros.com.tr",
+        "body_preview": "Sepetindeki ürünler stokta azaldı. Hemen sipariş ver.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "241",
+        "subject": "e-Okul: Vize sınav notları açıklandı",
+        "sender": "noreply@meb.gov.tr",
+        "body_preview": "Matematik vize notunuz sisteme işlendi.",
+        "expected_decision": "TUT",
+        "category": "education"
+    },
+    {
+        "id": "242",
+        "subject": "Akbank: Dijital altın bakiyesi güncellendi",
+        "sender": "noreply@akbank.com.tr",
+        "body_preview": "0.45 gram altın aldın. Güncel değer: 1.892 TL",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "243",
+        "subject": "Coursera Plus: Üyelik yenileme uyarısı",
+        "sender": "no-reply@coursera.org",
+        "body_preview": "Coursera Plus üyeliğin 7 gün içinde yenilenecek.",
+        "expected_decision": "TUT",
+        "category": "subscription"
+    },
+    {
+        "id": "244",
+        "subject": "Zara: Yeni koleksiyon bildirimi",
+        "sender": "indirim@zara.com.tr",
+        "body_preview": "Bu hafta gelen 120 yeni parça stokta.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "245",
+        "subject": "TÜİK: Enflasyon verisi yayımlandı",
+        "sender": "bilgi@tuik.gov.tr",
+        "body_preview": "Mart 2026 TÜFE %3,78 açıklandı.",
+        "expected_decision": "SIL",
+        "category": "notification"
+    },
+    {
+        "id": "246",
+        "subject": "Slack: #ankara-ekip kanalında 12 yeni mesaj",
+        "sender": "feedback@slack.com",
+        "body_preview": "Ekip son 45 dakikada aktif.",
+        "expected_decision": "TUT",
+        "category": "work"
+    },
+    {
+        "id": "247",
+        "subject": "GetirYemek: Yakınındaki kampanyalı restoranlar",
+        "sender": "kampanya@getir.com",
+        "body_preview": "Çankaya'da 15 restoran %30 indirimli.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "248",
+        "subject": "e-Devlet: Adli sicil kaydı yenilendi",
+        "sender": "noreply@turkiye.gov.tr",
+        "body_preview": "Adli sicil kaydınız güncellendi. İndirebilirsiniz.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "249",
+        "subject": "H&M: VIP müşterilere özel davet",
+        "sender": "kampanya@hm.com.tr",
+        "body_preview": "Sana özel VIP satış: 2 gün önce başlıyor.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "250",
+        "subject": "Ankara Valiliği: Hava durumu uyarısı",
+        "sender": "bildirim@ankara.gov.tr",
+        "body_preview": "Yarın sabah don bekleniyor. Dikkatli olun.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "251",
+        "subject": "Steam İstek Listenizdeki bir ürün indirimde!",
+        "sender": "noreply@steampowered.com",
+        "body_preview": "İstek listenizdeki 'Cyberpunk 2077' şu anda %50 indirimli. Teklif perşembe günü sona eriyor.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "252",
+        "subject": "Enpara.com: Para transferiniz (EFT) gerçekleşti",
+        "sender": "bilgi@enpara.com",
+        "body_preview": "Ahmet Yılmaz adlı kişiye yaptığınız 3.500,00 TL tutarındaki transfer başarıyla gerçekleşti.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "253",
+        "subject": "Vercel: Deployment Successful for 'portfolio-2026'",
+        "sender": "notifications@vercel.com",
+        "body_preview": "Your commit 'fix: update layout for mobile' has been successfully deployed to production.",
+        "expected_decision": "TUT",
+        "category": "work"
+    },
+    {
+        "id": "254",
+        "subject": "Amazon Web Services Invoice Available",
+        "sender": "no-reply-aws@amazon.com",
+        "body_preview": "Your AWS invoice for February 2026 is available. Total amount due is $14.50.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "255",
+        "subject": "Yemeksepeti: Siparişin yola çıktı!",
+        "sender": "siparis@yemeksepeti.com",
+        "body_preview": "Burger King (Çankaya) restoranından verdiğin sipariş kuryeye teslim edildi. Afiyet olsun!",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "256",
+        "subject": "Sahibinden.com: İlanınızla ilgili yeni bir mesajınız var",
+        "sender": "bilgi@sahibinden.com",
+        "body_preview": "Kullanıcı 'mehmet_06' size 'Satılık Macbook Pro 2023' ilanınız için mesaj gönderdi: 'Son fiyat ne olur?'",
+        "expected_decision": "TUT",
+        "category": "notification"
+    },
+    {
+        "id": "257",
+        "subject": "MACFit: Üyeliğiniz yakında yenilenecek",
+        "sender": "iletisim@macfit.com.tr",
+        "body_preview": "Aylık spor salonu üyeliğiniz 20 Mart 2026 tarihinde 850 TL olarak kartınızdan çekilecektir.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "258",
+        "subject": "Watsons Sürpriz Hafta Sonu İndirimi!",
+        "sender": "kampanya@watsons.com.tr",
+        "body_preview": "Sadece bu hafta sonuna özel cilt bakım ürünlerinde %40 indirim fırsatını kaçırma.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "259",
+        "subject": "Epic Games Makbuzunuz",
+        "sender": "help@epicgames.com",
+        "body_preview": "Satın alma işleminiz için teşekkürler. 'Death Stranding' kütüphanenize eklendi. Toplam: 0.00 TL.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "260",
+        "subject": "e-Devlet: Adınıza açılmış dava dosyası bilgilendirmesi",
+        "sender": "noreply@turkiye.gov.tr",
+        "body_preview": "UYAP Bilişim Sisteminde adınıza yeni bir evrak eklenmiştir. Detaylar için sisteme giriş yapınız.",
+        "expected_decision": "TUT",
+        "category": "official"
+    },
+    {
+        "id": "261",
+        "subject": "Martı Sürüş Özeti",
+        "sender": "iletisim@marti.tech",
+        "body_preview": "Bugünkü Martı sürüşün için teşekkürler! Sürüş süren: 12 dk. Tutar: 45,50 TL.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "262",
+        "subject": "Pegasus: PC2812 Uçuşunuz için Check-in yapın",
+        "sender": "info@flypgs.com",
+        "body_preview": "Ankara (ESB) - İstanbul (SAW) uçuşunuz için online check-in işlemlerinizi şimdi yapabilirsiniz.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "263",
+        "subject": "Airbnb: Ev sahibiniz Klaus size bir mesaj gönderdi",
+        "sender": "automated@airbnb.com",
+        "body_preview": "'Merhaba Eren, Berlin'e geliş saatiniz belli oldu mu? Anahtarı teslim etmek için soruyorum.'",
+        "expected_decision": "TUT",
+        "category": "travel"
+    },
+    {
+        "id": "264",
+        "subject": "Spotify Premium Fiyat Güncellemesi",
+        "sender": "no-reply@spotify.com",
+        "body_preview": "Önümüzdeki aydan itibaren Premium Bireysel planınızın fiyatı 59,99 TL olarak güncellenecektir.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "265",
+        "subject": "Teknosa'da Çılgın Cuma Başladı! 💻📱",
+        "sender": "kampanya@teknosa.com",
+        "body_preview": "Seçili telefon ve bilgisayarlarda sepette %15 net indirim! Stoklar tükenmeden yetişin.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "266",
+        "subject": "GitLab: Pipeline Failed in frontend-app / master",
+        "sender": "gitlab@company.com",
+        "body_preview": "Pipeline #4582 failed. Stage: test. Job: jest-unit-tests. Click here to view the logs.",
+        "expected_decision": "TUT",
+        "category": "work"
+    },
+    {
+        "id": "267",
+        "subject": "Discord Nitro Abonelik Yenileme Başarılı",
+        "sender": "billing@discord.com",
+        "body_preview": "Nitro aboneliğiniz bir ay daha uzatıldı. 74,99 TL tahsil edilmiştir. Desteklediğiniz için teşekkürler!",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "268",
+        "subject": "Figma: Jane mentioned you in 'Mobile App UI v2'",
+        "sender": "notifications@figma.com",
+        "body_preview": "Jane: '@Eren, bu butonun hover state rengini biraz daha koyu yapabilir miyiz?'",
+        "expected_decision": "TUT",
+        "category": "work"
+    },
+    {
+        "id": "269",
+        "subject": "HackerRank: Invitation to Software Engineer Assessment",
+        "sender": "invites@hackerrank.com",
+        "body_preview": "TechCorp has invited you to complete a coding assessment. You have 3 days to start the test.",
+        "expected_decision": "TUT",
+        "category": "job"
+    },
+    {
+        "id": "270",
+        "subject": "Medium Daily Digest",
+        "sender": "digest@medium.com",
+        "body_preview": "Today's highlights: '10 Things I Wish I Knew Before Learning React' and 4 other stories for you.",
+        "expected_decision": "SIL",
+        "category": "newsletter"
+    },
+    {
+        "id": "271",
+        "subject": "Amazon Prime Video: Sizin için yeni önerilerimiz var",
+        "sender": "primevideo@amazon.com.tr",
+        "body_preview": "Son izlediğiniz dizilere dayanarak sevebileceğinizi düşündüğümüz yeni içerikler eklendi: Fallout 2. Sezon.",
+        "expected_decision": "SIL",
+        "category": "notification"
+    },
+    {
+        "id": "272",
+        "subject": "iyzico İşlem Başarılı: Udemy",
+        "sender": "noreply@iyzico.com",
+        "body_preview": "Udemy üzerinden yaptığınız 129,90 TL tutarındaki ödemeniz iyzico güvencesiyle tamamlanmıştır.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "273",
+        "subject": "Obilet: Otobüs Biletiniz Onaylandı",
+        "sender": "bilet@obilet.com",
+        "body_preview": "Kamil Koç ile 18 Mart 2026 Ankara - İstanbul biletiniz başarıyla oluşturuldu. PNR: 4B8X9Q",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "274",
+        "subject": "BiTaksi: Sürüşün tamamlandı",
+        "sender": "iletisim@bitaksi.com",
+        "body_preview": "06T1234 plakalı araçla yaptığın yolculuğun faturası ektedir. Toplam tutar: 185,00 TL.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "275",
+        "subject": "Biletix: Satın Alma Onayı - Mor ve Ötesi",
+        "sender": "info@biletix.com",
+        "body_preview": "Mor ve Ötesi Ankara Konseri (25 Mart 2026) için 2 adet biletiniz hazır. QR kodlarınız ektedir.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "276",
+        "subject": "Uygulamaya Özel 2. Whopper Bedava!",
+        "sender": "kampanya@burgerking.com.tr",
+        "body_preview": "Sadece Burger King uygulamasından vereceğin siparişlerde 1 Alana 1 Bedava fırsatı!",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "277",
+        "subject": "Veteriner Kliniği: 'Mia' için parazit aşısı hatırlatması",
+        "sender": "bilgi@ankaravet.com",
+        "body_preview": "Merhaba Eren Bey, kediniz Mia'nın iç/dış parazit aşılarının zamanı gelmiştir. Randevu alabilirsiniz.",
+        "expected_decision": "TUT",
+        "category": "health"
+    },
+    {
+        "id": "278",
+        "subject": "e-Nabız: E-Reçeteniz sisteme eklendi",
+        "sender": "noreply@saglik.gov.tr",
+        "body_preview": "Ziyaret ettiğiniz hekim tarafından adınıza E-Reçete yazılmıştır. Reçete no: 59X7B...",
+        "expected_decision": "TUT",
+        "category": "health"
+    },
+    {
+        "id": "279",
+        "subject": "LinkedIn: Bu hafta aramalarda 15 kez bulundunuz",
+        "sender": "messages-noreply@linkedin.com",
+        "body_preview": "Profiliniz aramalarda çıkmaya devam ediyor. Hangi şirketlerin sizi aradığını görmek için tıklayın.",
+        "expected_decision": "SIL",
+        "category": "notification"
+    },
+    {
+        "id": "280",
+        "subject": "n11: Sepetindeki ürünler seni bekliyor",
+        "sender": "bulten@n11.com",
+        "body_preview": "Sepetinde bıraktığın 'Mekanik Klavye' ürünü tükenmek üzere. Hemen alışverişini tamamla.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "281",
+        "subject": "Microsoft: Xbox Game Pass faturanız",
+        "sender": "billing@microsoft.com",
+        "body_preview": "PC için Xbox Game Pass aylık aboneliğiniz yenilendi. Tahsil edilen tutar: 159,99 TL.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "282",
+        "subject": "Duolingo: Duo seni özledi 🦉",
+        "sender": "hello@duolingo.com",
+        "body_preview": "İngilizce pratiği yapmayalı uzun zaman oldu. 5 dakikanı ayırarak kelime bilgini tazelemeye ne dersin?",
+        "expected_decision": "SIL",
+        "category": "notification"
+    },
+    {
+        "id": "283",
+        "subject": "Stack Overflow: You earned a new badge!",
+        "sender": "do-not-reply@stackoverflow.email",
+        "body_preview": "Congratulations! You've earned the 'Enlightened' badge for your answer on 'React useEffect dependencies'.",
+        "expected_decision": "SIL",
+        "category": "forums"
+    },
+    {
+        "id": "284",
+        "subject": "Uyarı: Google Hesabınızın depolama alanı dolmak üzere",
+        "sender": "googleplay-noreply@google.com",
+        "body_preview": "15 GB'lık ücretsiz depolama alanınızın %95'ini kullandınız. Gmail ve Fotoğraflar için yer açın.",
+        "expected_decision": "TUT",
+        "category": "security"
+    },
+    {
+        "id": "285",
+        "subject": "Apple ID'niz ile yeni bir cihazda oturum açıldı",
+        "sender": "noreply@email.apple.com",
+        "body_preview": "Apple kimliğiniz 'iPhone 15 Pro' adlı cihazda kullanıldı. Eğer bu sizseniz, bu mesajı görmezden gelebilirsiniz.",
+        "expected_decision": "TUT",
+        "category": "security"
+    },
+    {
+        "id": "286",
+        "subject": "HGS: Bakiyeniz kritik seviyenin altında",
+        "sender": "noreply@ptt.gov.tr",
+        "body_preview": "06 ABC 123 plakalı aracınızın HGS bakiyesi 50 TL'nin altına düşmüştür. Cezalı duruma düşmemek için yükleme yapın.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "287",
+        "subject": "Letgo: Bir alıcı ürününle ilgileniyor",
+        "sender": "info@letgo.com",
+        "body_preview": "Kerem, 'PlayStation 5 Çift Kol' ilanın hakkında sana mesaj gönderdi. Hemen cevap vererek satışı hızlandır.",
+        "expected_decision": "TUT",
+        "category": "social"
+    },
+    {
+        "id": "288",
+        "subject": "Udemy: Favori eğitmeninizden YENİ bir kurs!",
+        "sender": "instructors@udemy.com",
+        "body_preview": "Takip ettiğiniz eğitmen 'İleri Seviye Next.js 15 Uygulamaları' adlı yeni bir kurs yayınladı. Üstelik 3 gün indirimli.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "289",
+        "subject": "ODTÜ Mezunları Derneği: Mart Ayı Bülteni",
+        "sender": "bulten@odtumd.org.tr",
+        "body_preview": "Vişnelik'te bu ay gerçekleşecek konserler, seminerler ve yeni aidat ödeme kolaylıkları hakkında her şey.",
+        "expected_decision": "TUT",
+        "category": "newsletter"
+    },
+    {
+        "id": "290",
+        "subject": "Tebrikler, Trendyol Elite oldun!",
+        "sender": "bildirim@trendyol.com",
+        "body_preview": "Alışveriş hedeflerini tamamladın ve Elite statüsüne yükseldin. Artık bedava kargo ve özel indirimler seninle.",
+        "expected_decision": "TUT",
+        "category": "notification"
+    },
+    {
+        "id": "291",
+        "subject": "YouTube: Biri yorumunuza yanıt verdi",
+        "sender": "noreply@youtube.com",
+        "body_preview": "Kullanıcı @CodeWithMe, 'Harika bir açıklama olmuş, teşekkürler!' yorumunuza bir yanıt bıraktı.",
+        "expected_decision": "TUT",
+        "category": "social"
+    },
+    {
+        "id": "292",
+        "subject": "Yemeksepeti Mahalle'de %20 İndirim Fırsatı",
+        "sender": "kampanya@yemeksepeti.com",
+        "body_preview": "Manav, kasap veya şarküteri... Mahalle esnafından yapacağın siparişlerde anında indirim sepetinde.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "293",
+        "subject": "Garanti BBVA İnternet Şubesi Giriş Şifreniz",
+        "sender": "noreply@garanti.com.tr",
+        "body_preview": "İnternet şubesine giriş için tek kullanımlık şifreniz: 849201. Şifrenizi kimseyle paylaşmayınız.",
+        "expected_decision": "TUT",
+        "category": "security"
+    },
+    {
+        "id": "294",
+        "subject": "GitHub: Your Copilot subscription will renew soon",
+        "sender": "support@github.com",
+        "body_preview": "This is a reminder that your GitHub Copilot Individual subscription will automatically renew on March 25, 2026.",
+        "expected_decision": "TUT",
+        "category": "transactional"
+    },
+    {
+        "id": "295",
+        "subject": "e-Devlet: Nüfus Kayıt Örneği belgeniz hazır",
+        "sender": "noreply@turkiye.gov.tr",
+        "body_preview": "Barkodlu 'Vukuatlı Nüfus Kayıt Örneği' belgeniz başarıyla oluşturuldu. PDF olarak indirebilirsiniz.",
+        "expected_decision": "TUT",
+        "category": "official"
+    },
+    {
+        "id": "296",
+        "subject": "IKEA Aile Puanlarınız siliniyor!",
+        "sender": "ikeafamily@ikea.com.tr",
+        "body_preview": "Hesabınızda bulunan 150 IKEA Aile puanının kullanım süresi bu ay sonu doluyor. Hemen mağazaya gelin.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "297",
+        "subject": "Zoom: Record of 'Q1 Tech Sync' is now available",
+        "sender": "no-reply@zoom.us",
+        "body_preview": "The cloud recording for your meeting 'Q1 Tech Sync' is ready to view and share with your team.",
+        "expected_decision": "TUT",
+        "category": "work"
+    },
+    {
+        "id": "298",
+        "subject": "Slack: You have unread messages in #frontend-team",
+        "sender": "notification@slack.com",
+        "body_preview": "While you were away, John and 2 others posted 8 new messages in #frontend-team. Catch up now.",
+        "expected_decision": "TUT",
+        "category": "work"
+    },
+    {
+        "id": "299",
+        "subject": "PlayStation Store: İstek Listendeki oyunlarda Bahar İndirimi",
+        "sender": "playstation@sony.com",
+        "body_preview": "İstek listendeki 'Ghost of Tsushima' ve 2 oyun daha Bahar İndirimi kampanyasına dahil oldu.",
+        "expected_decision": "SIL",
+        "category": "promotion"
+    },
+    {
+        "id": "300",
+        "subject": "Toplantı Daveti: 1-on-1 Performance Review",
+        "sender": "manager@company.com",
+        "body_preview": "Merhaba Eren, bu cuma Q1 performans değerlendirmesi ve gelecek hedeflerin için 1-on-1 yapacağız. Görüşmek üzere.",
+        "expected_decision": "TUT",
+        "category": "work"
+    }
 ]

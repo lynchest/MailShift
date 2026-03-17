@@ -24,7 +24,7 @@ from config import OllamaConfig, LMStudioConfig
 from fast_analyzer import fast_analyze
 from pro_analyzer import pro_analyze, check_ollama_health, check_lm_studio_health
 
-NUM_WORKERS = 8
+NUM_WORKERS = 4
 RESULTS_FILE = Path(__file__).parent / "eval_pro_mode_results.txt"
 
 
@@ -39,19 +39,21 @@ def _evaluate_item(item, cfg, backend):
     # 1. Fast Analysis
     fast_res = fast_analyze(meta)
 
-    # 2. AI Analysis (isolated — with fast_reason context)
-    ai_start = time.perf_counter()
-    ai_res = pro_analyze(
-        meta, cfg,
-        backend=backend,
-        fast_reason=fast_res.reason if fast_res.decision == "SIL" else "",
-    )
-    ai_elapsed = time.perf_counter() - ai_start
-
-    # 3. Full Pro Mode logic: Fast first, then AI if Fast is SIL
+    # 2. Full Pro Mode logic: Fast first, then AI if Fast is SIL
+    # Only call AI for emails that fast mode marked as SIL (real scenario behavior)
     pro_mode_res = fast_res
     run_ai = False
+    ai_res = ScanResult(mail=meta, decision="TUT", reason="")
+    ai_elapsed = 0.0
+
     if fast_res.decision == "SIL":
+        ai_start = time.perf_counter()
+        ai_res = pro_analyze(
+            meta, cfg,
+            backend=backend,
+            fast_reason=fast_res.reason if fast_res.decision == "SIL" else "",
+        )
+        ai_elapsed = time.perf_counter() - ai_start
         pro_mode_res = ai_res
         run_ai = True
 

@@ -257,7 +257,15 @@ class LLMProvider(ABC):
         except json.JSONDecodeError:
             pass # Fallback to manual extraction
 
-        # 2. Fallback to extracting from pseudo-JSON or plain text
+        # 2. Extract from <think> tags if present but keep the decision outside
+        raw_thinking = ""
+        think_match = re.search(r"<think>(.*?)</think>", response, flags=re.DOTALL | re.IGNORECASE)
+        if think_match:
+            raw_thinking = think_match.group(1).strip()
+            # Remove thinking from response to parse decision better
+            response = response.replace(think_match.group(0), "").strip()
+
+        # 3. Fallback to extracting from pseudo-JSON or plain text
         decision = self._extract_decision_from_json(response)
         if decision is None:
             normalized = self._normalize_for_decision_parse(response)
@@ -268,6 +276,12 @@ class LLMProvider(ABC):
             decision = "SIL" if first == "sil" else "TUT"
 
         reason = self._extract_reason(response, decision)
+        
+        # If we had thinking, we can prefix it or use it as partial reason
+        if raw_thinking:
+            # We keep it for logging/debugging but decision priority is clear
+            log.debug(f"LLM Thinking: {raw_thinking[:200]}...")
+
         return (decision, reason)
 
     def _extract_decision_from_json(self, response: str) -> Optional[str]:
@@ -363,7 +377,7 @@ class OllamaProvider(LLMProvider):
                 {"role": "user", "content": user_prompt},
             ],
             "stream": False,
-            "think": False,
+            "think": self.cfg.use_think,
             "format": {
                 "type": "object",
                 "properties": {
@@ -374,6 +388,7 @@ class OllamaProvider(LLMProvider):
             },
             "options": {
                 **self.runtime_options,
+                "num_predict": 512 if self.cfg.use_think else 256, # More tokens if thinking
             }
         }
         max_attempts = 2
@@ -440,7 +455,7 @@ class LMStudioProvider(LLMProvider):
             ],
             "stream": False,
             "temperature": 0.0,
-            "max_tokens": 256,
+            "max_tokens": 512 if self.cfg.use_think else 256,
         }
         max_attempts = 2
         for attempt in range(max_attempts):
