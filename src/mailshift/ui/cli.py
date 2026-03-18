@@ -378,9 +378,7 @@ def install_ollama() -> bool:
 
             stdout=sys.stdout,
 
-            stderr=sys.stderr,
-
-            shell=True
+            stderr=sys.stderr
 
         )
 
