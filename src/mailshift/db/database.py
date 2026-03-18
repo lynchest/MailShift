@@ -68,7 +68,7 @@ def save_mails_cache(mails: list[MailMeta], batch_size: int = 500) -> None:
                 ''',
                 rows[i : i + batch_size],
             )
-            conn.commit()
+        conn.commit()
 
 def load_mails_cache() -> Optional[list[MailMeta]]:
     """Load cached MailMeta objects from SQLite."""
