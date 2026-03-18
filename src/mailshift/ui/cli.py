@@ -72,7 +72,9 @@ from ..utils.paths import get_path
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
-_CREDENTIALS_FILE = get_path("credentials.json")
+import keyring
+
+_KEYRING_SERVICE = "MailShift"  # Windows Credential Manager'da görünen servis adı
 
 _OLLAMA_STARTED_BY_US = False  # Track if we started Ollama automatically
 
@@ -82,29 +84,11 @@ _OLLAMA_STARTED_BY_US = False  # Track if we started Ollama automatically
 
 def _load_saved_credentials() -> dict[str, dict[str, str]]:
 
-    """Load provider-based saved credentials from disk."""
+    """Load provider-based saved credentials from OS keyring."""
 
-    if not _CREDENTIALS_FILE.exists():
+    # Artık kullanılmıyor — keyring per-provider sorgular.
 
-        return {}
-
-
-
-    try:
-
-        with open(_CREDENTIALS_FILE, encoding="utf-8") as f:
-
-            data = json.load(f)
-
-        if isinstance(data, dict):
-
-            return data
-
-    except Exception:
-
-        # Corrupt/unreadable file should not block login flow.
-
-        pass
+    # Geriye uyumluluk için boş dict döndür.
 
     return {}
 
@@ -114,23 +98,23 @@ def _load_saved_credentials() -> dict[str, dict[str, str]]:
 
 def _get_saved_credentials(provider: Provider) -> tuple[str, str] | None:
 
-    saved = _load_saved_credentials()
+    """OS keyring'den provider bazlı kayıtlı kimlik bilgilerini çek."""
 
-    provider_data = saved.get(provider.value)
+    try:
 
-    if not isinstance(provider_data, dict):
+        # username keyring'de ayrı bir anahtar olarak saklanır
 
-        return None
+        username = keyring.get_password(_KEYRING_SERVICE, f"{provider.value}:username")
 
+        password = keyring.get_password(_KEYRING_SERVICE, f"{provider.value}:password")
 
+        if username and password:
 
-    username = provider_data.get("username")
+            return username, password
 
-    password = provider_data.get("password")
+    except Exception:
 
-    if isinstance(username, str) and isinstance(password, str) and username and password:
-
-        return username, password
+        pass
 
     return None
 
@@ -140,23 +124,13 @@ def _get_saved_credentials(provider: Provider) -> tuple[str, str] | None:
 
 def _save_credentials(provider: Provider, username: str, password: str) -> bool:
 
-    """Persist credentials so user can reuse them in future runs."""
+    """Kimlik bilgilerini OS keyring'e (Windows Credential Manager) yaz."""
 
     try:
 
-        data = _load_saved_credentials()
+        keyring.set_password(_KEYRING_SERVICE, f"{provider.value}:username", username)
 
-        data[provider.value] = {
-
-            "username": username,
-
-            "password": password,
-
-        }
-
-        with open(_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
-
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        keyring.set_password(_KEYRING_SERVICE, f"{provider.value}:password", password)
 
         return True
 
@@ -1294,21 +1268,22 @@ def prompt_credentials(
 
             saved_username, saved_password = saved_creds
 
-            console.print(
+            if Confirm.ask(
 
-                Panel(
+                f"[bold]Kaydedilmiş kimlik bilgileri bulundu:[/bold] [cyan]{saved_username}[/cyan]\n"
 
-                    f"[bold green]✔[/bold green] Kayıtlı kimlik bilgileri kullanılıyor: [cyan]{saved_username}[/cyan]",
+                "  Bu bilgileri kullanayım mı?",
 
-                    border_style="green",
+                default=True,
 
-                )
+            ):
 
-            )
+                clear_console()
+
+                return saved_username, saved_password
 
             clear_console()
 
-            return saved_username, saved_password
 
 
 
@@ -1370,7 +1345,7 @@ def prompt_credentials(
 
 
 
-    password = preset_password if preset_password else getpass.getpass("Åifre (App Password / Bridge şifresi): ")
+    password = preset_password if preset_password else getpass.getpass("Şifre (App Password / Bridge şifresi): ")
 
 
 

@@ -1,4 +1,3 @@
-import pytest
 import requests
 from unittest.mock import patch, MagicMock
 from mailshift.utils.hardware import SystemInfo
