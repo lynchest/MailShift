@@ -283,6 +283,18 @@ def _make_app_cfg(mode: Mode = Mode.FAST, dry_run: bool = True) -> AppConfig:
     return AppConfig(provider=Provider.GMAIL, mode=mode, imap=imap, dry_run=dry_run)
 
 
+def test_engine_run_connect_failure_calls_disconnect():
+    cfg = _make_app_cfg(mode=Mode.FAST)
+    engine = MailEngine(cfg)
+
+    with patch.object(engine, "connect", side_effect=RuntimeError("Connection failed")), \
+         patch.object(engine, "disconnect") as mock_disconnect:
+        with pytest.raises(RuntimeError, match="Connection failed"):
+            engine.run()
+
+        mock_disconnect.assert_called_once()
+
+
 def test_engine_analyze_fast_mode():
     cfg = _make_app_cfg(mode=Mode.FAST)
     engine = MailEngine(cfg)
