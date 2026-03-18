@@ -46,6 +46,19 @@ from ...utils.logger import log
 
 _session: Optional[requests.Session] = None
 
+# ── Compiled patterns for reason extraction ──────────────────────────────
+
+REASON_PATTERNS = [
+    re.compile(r'çünkü\s+(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'nedeni[:\s]\s*(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'sebebi[:\s]\s*(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'because\s+(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'since\s+(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'reason:\s*(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'it is\s+(a\s+\w+)\s+', re.IGNORECASE),
+    re.compile(r'this is\s+(a\s+\w+)\s+', re.IGNORECASE),
+]
+
 
 
 
@@ -650,29 +663,9 @@ class LLMProvider(ABC):
 
         response_lower = response.lower()
 
-        patterns = [
+        for pattern in REASON_PATTERNS:
 
-            r'çünkü\s+(.+?)(?:\.|$)',
-
-            r'nedeni[:\s]\s*(.+?)(?:\.|$)',
-
-            r'sebebi[:\s]\s*(.+?)(?:\.|$)',
-
-            r'because\s+(.+?)(?:\.|$)',
-
-            r'since\s+(.+?)(?:\.|$)',
-
-            r'reason:\s*(.+?)(?:\.|$)',
-
-            r'it is\s+(a\s+\w+)\s+',
-
-            r'this is\s+(a\s+\w+)\s+',
-
-        ]
-
-        for pattern in patterns:
-
-            match = re.search(pattern, response_lower)
+            match = pattern.search(response_lower)
 
             if match:
 
