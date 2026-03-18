@@ -110,8 +110,6 @@ def fast_analyze(meta: MailMeta) -> ScanResult:
 
     full_text = _normalize(f"{meta.subject} {meta.sender} {meta.body_preview}")
 
-    content_text = _normalize(f"{meta.subject} {meta.body_preview}")
-
 
 
     if WHITELIST_PATTERN:
@@ -133,6 +131,8 @@ def fast_analyze(meta: MailMeta) -> ScanResult:
 
 
     if JUNK_PATTERN:
+
+        content_text = _normalize(f"{meta.subject} {meta.body_preview}")
 
         match = JUNK_PATTERN.search(content_text)
 
