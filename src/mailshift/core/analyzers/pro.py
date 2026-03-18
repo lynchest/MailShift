@@ -17,8 +17,8 @@ Supports two backends:
 import re
 import json
 import os
-import threading
 import unicodedata
+import threading
 from typing import Optional, Union
 
 import requests
@@ -38,6 +38,19 @@ from ...utils.logger import log
 # ── Module-level connection pool ─────────────────────────────────────────
 
 _session: Optional[requests.Session] = None
+
+# ── Compiled patterns for reason extraction ──────────────────────────────
+
+REASON_PATTERNS = [
+    re.compile(r'çünkü\s+(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'nedeni[:\s]\s*(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'sebebi[:\s]\s*(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'because\s+(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'since\s+(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'reason:\s*(.+?)(?:\.|$)', re.IGNORECASE),
+    re.compile(r'it is\s+(a\s+\w+)\s+', re.IGNORECASE),
+    re.compile(r'this is\s+(a\s+\w+)\s+', re.IGNORECASE),
+]
 
 
 
@@ -476,90 +489,55 @@ class LLMProvider(ABC):
 
 
     def _parse_llm_response(self, response: str) -> tuple[str, str]:
-
         """Shared parser logic for LLM decisions."""
-
         response = (response or "").strip()
-
         if not response:
-
             return ("TUT", "invalid-response")
 
-
-
-        # 1. Try direct JSON parsing first (Structured Outputs)
-
-        try:
-
-            parsed = json.loads(response)
-
-            if isinstance(parsed, dict) and "decision" in parsed:
-
-                decision = str(parsed["decision"]).upper()
-
-                if decision in {"SIL", "TUT"}:
-
-                    reason = str(parsed.get("reason", "no reason provided"))
-
-                    return (decision, reason)
-
-        except json.JSONDecodeError:
-
-            pass # Fallback to manual extraction
-
-
-
-        # 2. Extract from <think> tags if present but keep the decision outside
-
+        # 1. Extract from <think> tags if present
         raw_thinking = ""
-
         think_match = re.search(r"<think>(.*?)</think>", response, flags=re.DOTALL | re.IGNORECASE)
-
         if think_match:
-
             raw_thinking = think_match.group(1).strip()
-
             # Remove thinking from response to parse decision better
-
             response = response.replace(think_match.group(0), "").strip()
 
+        # Sanitize thinking (remove newlines, truncate)
+        prefix = ""
+        if raw_thinking:
+            sanitized = raw_thinking.replace("\n", " ").replace("\r", " ")
+            sanitized = re.sub(r"\s+", " ", sanitized).strip()
+            if len(sanitized) > 100:
+                sanitized = sanitized[:97] + "..."
+            prefix = f"({sanitized}) "
 
+        # 2. Try direct JSON parsing first (Structured Outputs)
+        try:
+            parsed = json.loads(response)
+            if isinstance(parsed, dict) and "decision" in parsed:
+                decision = str(parsed["decision"]).upper()
+                if decision in {"SIL", "TUT"}:
+                    reason = str(parsed.get("reason", "no reason provided"))
+                    return (decision, f"{prefix}{reason}")
+        except json.JSONDecodeError:
+            pass # Fallback to manual extraction
 
         # 3. Fallback to extracting from pseudo-JSON or plain text
-
         decision = self._extract_decision_from_json(response)
-
         if decision is None:
-
             normalized = self._normalize_for_decision_parse(response)
-
             matches = list(re.finditer(r"\b(sil|tut)\b", normalized, flags=re.IGNORECASE))
-
             if not matches:
-
                 return ("TUT", "invalid-response")
-
             first = matches[0].group(1).lower()
-
             decision = "SIL" if first == "sil" else "TUT"
-
-
 
         reason = self._extract_reason(response, decision)
 
-        
-
-        # If we had thinking, we can prefix it or use it as partial reason
-
         if raw_thinking:
-
-            # We keep it for logging/debugging but decision priority is clear
-
             log.debug(f"LLM Thinking: {raw_thinking[:200]}...")
 
-
-
-        return (decision, reason)
+        return (decision, f"{prefix}{reason}")
 
 
 
@@ -643,29 +621,9 @@ class LLMProvider(ABC):
 
         response_lower = response.lower()
 
-        patterns = [
+        for pattern in REASON_PATTERNS:
 
-            r'çünkü\s+(.+?)(?:\.|$)',
-
-            r'nedeni[:\s]\s*(.+?)(?:\.|$)',
-
-            r'sebebi[:\s]\s*(.+?)(?:\.|$)',
-
-            r'because\s+(.+?)(?:\.|$)',
-
-            r'since\s+(.+?)(?:\.|$)',
-
-            r'reason:\s*(.+?)(?:\.|$)',
-
-            r'it is\s+(a\s+\w+)\s+',
-
-            r'this is\s+(a\s+\w+)\s+',
-
-        ]
-
-        for pattern in patterns:
-
-            match = re.search(pattern, response_lower)
+            match = pattern.search(response_lower)
 
             if match:
 

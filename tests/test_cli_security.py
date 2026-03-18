@@ -1,0 +1,59 @@
+import sys
+from unittest.mock import patch, MagicMock
+
+# Mock dependencies before importing mailshift.ui.cli
+mock_rich = MagicMock()
+mock_requests = MagicMock()
+mock_psutil = MagicMock()
+mock_bs4 = MagicMock()
+
+sys.modules["rich"] = mock_rich
+sys.modules["rich.panel"] = mock_rich.panel
+sys.modules["rich.progress"] = mock_rich.progress
+sys.modules["rich.prompt"] = mock_rich.prompt
+sys.modules["rich.table"] = mock_rich.table
+sys.modules["rich.box"] = mock_rich.box
+sys.modules["requests"] = mock_requests
+sys.modules["psutil"] = mock_psutil
+sys.modules["bs4"] = mock_bs4
+
+import pytest
+
+# Mock internal package imports
+sys.modules["mailshift.config.config"] = MagicMock()
+sys.modules["mailshift.ui.styles"] = MagicMock()
+sys.modules["mailshift.utils.paths"] = MagicMock()
+
+from mailshift.ui.cli import install_ollama
+
+def test_install_ollama_subprocess_no_shell():
+    """
+    Verify that install_ollama calls subprocess.Popen without shell=True.
+    This is a security best practice to avoid shell injection vulnerabilities.
+    """
+    # Mock sys.platform to be win32 to enter the installation block
+    with patch("mailshift.ui.cli.sys.platform", "win32"), \
+         patch("mailshift.ui.cli.subprocess.Popen") as mock_popen, \
+         patch("mailshift.ui.cli.console") as mock_console, \
+         patch("mailshift.ui.cli.show_ollama_next_steps") as mock_show_steps:
+
+        # Mock the process returned by Popen
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_popen.return_value = mock_process
+
+        # Execute the function
+        result = install_ollama()
+
+        # Assertions
+        assert result is True
+        mock_popen.assert_called_once()
+
+        args, kwargs = mock_popen.call_args
+
+        # Check shell parameter
+        assert kwargs.get("shell") is not True, "subprocess.Popen called with shell=True"
+
+        # Verify the command list
+        expected_cmd = ["powershell", "-Command", "irm https://ollama.com/install.ps1 | iex"]
+        assert args[0] == expected_cmd
