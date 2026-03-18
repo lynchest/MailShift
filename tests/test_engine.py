@@ -19,9 +19,30 @@ from mailshift.config.config import (
     Provider,
     build_imap_config,
 )
-from mailshift.core.engine import MailEngine, _extract_body_preview
+from mailshift.core.engine import MailEngine, _extract_body_preview, chunk_list
 from mailshift.models.models import MailMeta, ScanResult, ScanStats
 
+
+# ---------------------------------------------------------------------------
+# chunk_list helpers
+# ---------------------------------------------------------------------------
+
+
+def test_chunk_list_perfect_division():
+    assert list(chunk_list([1, 2, 3, 4], 2)) == [[1, 2], [3, 4]]
+
+def test_chunk_list_remainder():
+    assert list(chunk_list([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
+
+def test_chunk_list_empty():
+    assert list(chunk_list([], 2)) == []
+
+def test_chunk_list_smaller_than_chunk():
+    assert list(chunk_list([1, 2], 5)) == [[1, 2]]
+
+def test_chunk_list_zero_chunk_size():
+    with pytest.raises(ValueError, match="range\\(\\) arg 3 must not be zero"):
+        list(chunk_list([1, 2], 0))
 
 # ---------------------------------------------------------------------------
 # build_imap_config helpers
