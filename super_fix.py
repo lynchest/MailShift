@@ -5,7 +5,7 @@ def repair_content(content):
     # Step 1: Remove the specific syntax error in history.py
     content = content.replace('\n|\n', '\n')
     
-    # Step 2: Fix double-encoding mangling
+    # Step 2: Repair double-encoding mangling
     try:
         # Try to repair the string if it was double-encoded
         # (interpreted as latin-1/cp1252 and then saved as utf-8)
