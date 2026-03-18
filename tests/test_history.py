@@ -19,15 +19,15 @@ def mock_logs_dir(tmp_path):
 
 
 def test_save_cleanup_log(monkeypatch, tmp_path):
-    # Monkeypatch history.Path so that when it's called with "logs", it returns tmp_path / "logs"
-    original_path = history.Path
+    # Monkeypatch get_path so that when it's called with "logs", it returns tmp_path / "logs"
+    original_get_path = history.get_path
 
-    def mock_path(*args, **kwargs):
-        if args and args[0] == "logs":
+    def mock_get_path(name):
+        if name == "logs":
             return tmp_path / "logs"
-        return original_path(*args, **kwargs)
+        return original_get_path(name)
 
-    monkeypatch.setattr(history, "Path", mock_path)
+    monkeypatch.setattr(history, "get_path", mock_get_path)
 
     stats = ScanStats(
         total_scanned=10,
@@ -48,7 +48,7 @@ def test_save_cleanup_log(monkeypatch, tmp_path):
         mode="pro",
     )
 
-    path = original_path(log_file_path)
+    path = Path(log_file_path)
     assert path.exists()
     assert path.parent == (tmp_path / "logs")
 

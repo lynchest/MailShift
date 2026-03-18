@@ -21,11 +21,7 @@ import unicodedata
 import threading
 from typing import Optional, Union
 
-
-
 import requests
-
-
 
 from ...config.config import OllamaConfig, LMStudioConfig
 
