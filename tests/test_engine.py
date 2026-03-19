@@ -19,9 +19,30 @@ from mailshift.config.config import (
     Provider,
     build_imap_config,
 )
-from mailshift.core.engine import MailEngine, _extract_body_preview
+from mailshift.core.engine import MailEngine, _extract_body_preview, chunk_list
 from mailshift.models.models import MailMeta, ScanResult, ScanStats
 
+
+# ---------------------------------------------------------------------------
+# chunk_list helpers
+# ---------------------------------------------------------------------------
+
+
+def test_chunk_list_perfect_division():
+    assert list(chunk_list([1, 2, 3, 4], 2)) == [[1, 2], [3, 4]]
+
+def test_chunk_list_remainder():
+    assert list(chunk_list([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
+
+def test_chunk_list_empty():
+    assert list(chunk_list([], 2)) == []
+
+def test_chunk_list_smaller_than_chunk():
+    assert list(chunk_list([1, 2], 5)) == [[1, 2]]
+
+def test_chunk_list_zero_chunk_size():
+    with pytest.raises(ValueError, match="range\\(\\) arg 3 must not be zero"):
+        list(chunk_list([1, 2], 0))
 
 # ---------------------------------------------------------------------------
 # build_imap_config helpers
@@ -281,6 +302,18 @@ def test_pro_analyze_truncates_body_to_max_chars():
 def _make_app_cfg(mode: Mode = Mode.FAST, dry_run: bool = True) -> AppConfig:
     imap = build_imap_config(Provider.GMAIL, "u@g.com", "p")
     return AppConfig(provider=Provider.GMAIL, mode=mode, imap=imap, dry_run=dry_run)
+
+
+def test_engine_run_connect_failure_calls_disconnect():
+    cfg = _make_app_cfg(mode=Mode.FAST)
+    engine = MailEngine(cfg)
+
+    with patch.object(engine, "connect", side_effect=RuntimeError("Connection failed")), \
+         patch.object(engine, "disconnect") as mock_disconnect:
+        with pytest.raises(RuntimeError, match="Connection failed"):
+            engine.run()
+
+        mock_disconnect.assert_called_once()
 
 
 def test_engine_analyze_fast_mode():

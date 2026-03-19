@@ -790,15 +790,24 @@ class MailEngine:
             Pass ``True`` to skip UIDs already checkpointed from a previous
             interrupted run.
         """
-        uids = self.list_uids()
-        mails = self.fetch_headers_concurrent(
-            uids, progress_cb=fetch_progress_cb, resume=resume
-        )
-        results, stats = self.analyze(mails, progress_cb=analyze_progress_cb)
+        log.info("Starting Engine run")
+        try:
+            self.connect()
+            uids = self.list_uids()
+            if not uids:
+                log.info("No messages found.")
+                return [], ScanStats()
 
-        if not self.cfg.dry_run and (
-            delete_uids := [r.mail.uid for r in results if r.decision == "SIL"]
-        ):
-            self.delete_mails(delete_uids, progress_cb=delete_progress_cb)
+            mails = self.fetch_headers_concurrent(
+                uids, progress_cb=fetch_progress_cb, resume=resume
+            )
+            results, stats = self.analyze(mails, progress_cb=analyze_progress_cb)
 
-        return results, stats
+            if not self.cfg.dry_run and (
+                delete_uids := [r.mail.uid for r in results if r.decision == "SIL"]
+            ):
+                self.delete_mails(delete_uids, progress_cb=delete_progress_cb)
+
+            return results, stats
+        finally:
+            self.disconnect()
