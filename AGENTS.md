@@ -7,7 +7,7 @@
 - On any LLM or analysis error, fall back to `"TUT"` — never `"SIL"`. Safety-first.
 - Emails with `has_attachment=True` must always return `"TUT"` (enforced in `fast_analyzer.py`). Do not remove this guard.
 - Only update `AGENTS.md` and `README.md` if the changes introduce new conventions, logic, or significant architectural shifts. Minor bugfixes or trivial cleanups do not require documentation updates.
-- `IMAPConfig.password` is a `SecretStr` (Pydantic). Access its value with `.get_secret_value()`, never direct attribute access.
+- `IMAPConfig.password` Pydantic kütüphanesi ile `SecretStr` olarak tanımlanmıştır. Değerine erişmek için her zaman `.get_secret_value()` kullanılmalıdır, doğrudan öznitelik erişimi (`.password`) yasaktır. Bu sayede parola loglarda veya hata çıktılarında açık şekilde görünmez.
 
 ## Validation before finishing
 
@@ -37,7 +37,7 @@ No other build or lint step is configured.
 
 - `mailshift.db` — SQLite cache, created at **CWD** (not a fixed path). Contains `mails_cache` (header/body cache) and `fetch_checkpoint` (resume table). Persists across runs. Delete it or call `clear_mails_cache()` to force a fresh scan.
 - `whitelist.json` / `blacklist.json` — project root, not in a subdirectory.
-- `credentials.json` — project root, stores provider-based credential cache used by interactive "reuse previous credentials" prompt.
+- **OS Keyring** (Windows Credential Manager) — Kimlik bilgileri `keyring` kütüphanesi ile OS düzeyinde şifreli olarak saklanır. Proje dizininde düz metin / JSON şifre dosyası tutulmaz.
 
 ## Change safety rules
 

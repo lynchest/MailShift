@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from typing import Optional
+from typing import Optional, Any
 
 
 
@@ -122,7 +122,7 @@ from ..utils.paths import get_path
 
 
 
-def _load_keywords(filename: str) -> list[str]:
+def _load_keywords(filename: str) -> Any:
 
     path = get_path(filename)
 
@@ -134,7 +134,7 @@ def _load_keywords(filename: str) -> list[str]:
 
 
 
-def _save_keywords(filename: str, keywords: list[str]) -> None:
+def _save_keywords(filename: str, keywords: Any) -> None:
 
     path = get_path(filename)
 
@@ -186,6 +186,38 @@ def add_to_blacklist(word: str) -> bool:
 
     keywords = _load_keywords("blacklist.json")
 
+    if isinstance(keywords, dict):
+
+        normalized = word.strip().lower()
+
+        flat_existing = {
+            str(k).strip().lower()
+            for items in keywords.values()
+            if isinstance(items, list)
+            for k in items
+            if isinstance(k, str)
+        }
+
+        if normalized in flat_existing:
+
+            return False
+
+        target_category = "uncategorized"
+
+        if target_category not in keywords or not isinstance(keywords[target_category], list):
+
+            keywords[target_category] = []
+
+        keywords[target_category].append(word)
+
+        _save_keywords("blacklist.json", keywords)
+
+        return True
+
+    if not isinstance(keywords, list):
+
+        return False
+
     if word not in keywords:
 
         keywords.append(word)
@@ -203,6 +235,36 @@ def add_to_blacklist(word: str) -> bool:
 def remove_from_blacklist(word: str) -> bool:
 
     keywords = _load_keywords("blacklist.json")
+
+    if isinstance(keywords, dict):
+
+        removed = False
+
+        target = word.strip().lower()
+
+        for category, items in keywords.items():
+
+            if not isinstance(items, list):
+
+                continue
+
+            before = len(items)
+
+            keywords[category] = [k for k in items if not (isinstance(k, str) and k.strip().lower() == target)]
+
+            if len(keywords[category]) < before:
+
+                removed = True
+
+        if removed:
+
+            _save_keywords("blacklist.json", keywords)
+
+        return removed
+
+    if not isinstance(keywords, list):
+
+        return False
 
     if word in keywords:
 
@@ -222,7 +284,7 @@ def list_keywords() -> tuple[list[str], list[str]]:
 
     whitelist = _load_keywords("whitelist.json")
 
-    blacklist = _load_keywords("blacklist.json")
+    blacklist = _flatten_blacklist_keywords(_load_keywords("blacklist.json"))
 
     return whitelist, blacklist
 
@@ -230,7 +292,98 @@ def list_keywords() -> tuple[list[str], list[str]]:
 
 
 
-JUNK_KEYWORDS: list[str] = _load_keywords("blacklist.json")
+def _flatten_blacklist_keywords(raw_blacklist: Any) -> list[str]:
+
+    if isinstance(raw_blacklist, list):
+
+        return [k for k in raw_blacklist if isinstance(k, str)]
+
+    if isinstance(raw_blacklist, dict):
+
+        flattened: list[str] = []
+
+        for items in raw_blacklist.values():
+
+            if isinstance(items, list):
+
+                flattened.extend(k for k in items if isinstance(k, str))
+
+        return flattened
+
+    return []
+
+
+def _build_blacklist_category_map(raw_blacklist: Any) -> dict[str, str]:
+
+    def _infer_category(keyword: str) -> str:
+
+        key = keyword.lower()
+
+        newsletter_tokens = (
+            "newsletter", "bülten", "bulten", "digest", "weekly", "daily", "substack", "mailchimp",
+        )
+
+        subscription_tokens = (
+            "unsubscribe", "abonelik", "aboneligi", "aboneliği", "list-unsubscribe", "opt out", "opt-out",
+            "üyelik", "uyelik", "subscription", "listeden çık", "listeden cik", "preferences", "tercih",
+        )
+
+        promotion_tokens = (
+            "discount", "indirim", "kampanya", "campaign", "offer", "fırsat", "firsat", "sale", "coupon",
+            "kupon", "free shipping", "ücretsiz kargo", "black friday", "deal", "promo", "promotion",
+            "flash sale", "special offer", "sepet", "cart",
+        )
+
+        if any(token in key for token in newsletter_tokens):
+
+            return "newsletter"
+
+        if any(token in key for token in subscription_tokens):
+
+            return "subscription"
+
+        if any(token in key for token in promotion_tokens):
+
+            return "promotion"
+
+        return "uncategorized"
+
+    mapping: dict[str, str] = {}
+
+    if isinstance(raw_blacklist, dict):
+
+        for category, items in raw_blacklist.items():
+
+            cat = str(category).strip().lower() or "uncategorized"
+
+            if not isinstance(items, list):
+
+                continue
+
+            for item in items:
+
+                if isinstance(item, str):
+
+                    mapping[item.lower()] = cat
+
+        return mapping
+
+    if isinstance(raw_blacklist, list):
+
+        for item in raw_blacklist:
+
+            if isinstance(item, str):
+
+                mapping[item.lower()] = _infer_category(item)
+
+    return mapping
+
+
+RAW_BLACKLIST_KEYWORDS: Any = _load_keywords("blacklist.json")
+
+JUNK_KEYWORDS: list[str] = _flatten_blacklist_keywords(RAW_BLACKLIST_KEYWORDS)
+
+BLACKLIST_CATEGORY_MAP: dict[str, str] = _build_blacklist_category_map(RAW_BLACKLIST_KEYWORDS)
 
 WHITELIST_KEYWORDS: list[str] = _load_keywords("whitelist.json")
 
@@ -256,59 +409,34 @@ JUNK_PATTERN = re.compile('|'.join(_JUNK_ESCAPED), re.IGNORECASE) if _JUNK_ESCAP
 
 WHITELIST_PATTERN = re.compile('|'.join(_WHITELIST_ESCAPED), re.IGNORECASE) if _WHITELIST_ESCAPED else None
 
+
+def get_blacklist_category_for_match(matched_token: str) -> str:
+
+    key = (matched_token or "").strip().lower()
+
+    if not key:
+
+        return "uncategorized"
+
+    return BLACKLIST_CATEGORY_MAP.get(key, "uncategorized")
+
 DEFAULT_SYSTEM_PROMPT = """
+MailShift için e-posta sınıflandırması yap.
 
-Sen bir e-posta temizleme asistanısın. E-postaları SIL veya TUT olarak sınıflandır.
+Yalnızca geçerli JSON döndür:
+{"decision":"SIL|TUT","reason":"kısa"}
 
+Karar kuralları:
+- SIL: Pazarlama/satış, kampanya/indirim, sepet hatırlatma, bülten/digest, sadakat-puan/VIP, gamification, genel kurumsal duyurular.
+- TUT: Kişisel yazışma, fatura/dekont, banka/ödeme, şifre sıfırlama/OTP, kargo/teslimat, resmi vergi-hukuki bildirim, abonelik iptali/ücretli yenileme uyarısı.
 
+Çakışma kuralı:
+- Mesaj hem pazarlama hem operasyonel görünüyorsa güvenlik/ödeme/fatura içeriği varsa TUT, yoksa SIL.
 
-JSON formatında cevap ver: {"decision": "SIL" | "TUT", "reason": "kısa açıklama"}
-
-
-
-KRİTİK SIL (KESİNLİKLE SİLİNECEKLER):
-
-1. PAZARLAMA/SATIŞ: İndirim, kampanya, sepet uyarısı ("Sepetinde ürün var"), indirim kodu.
-
-2. GAMIFICATION/STRATEJİ: "Serin 45 güne ulaştı", "Duo seni özledi", "Rozet kazandın", "Tamamla kazan".
-
-3. SADAKAT: "Puanların siliniyor", "VIP davet".
-
-4. BÜLTEN VE ÖZET (newsletter): "Weekly Tech Digest", "Daily Digest", "Topluluğu Bülteni", "Haftalık Bülten".
-
-5. RESMİ AMA ÖNEMSİZ: Belediye etkinlikleri (İftar, kutlama), TÜİK gibi kurumların sadece veri yayınlama duyuruları.
-
-
-
-KRİTİK TUT (ASLA SİLME):
-
-1. KİŞİSEL: Arkadaş, aile, iş arkadaşı veya doğrudan sana yazılan özel mesajlar.
-
-2. Operasyonel: Fatura, dekont, banka ekstresi, şifre sıfırlama, OTP, kargo takibi, resmi vergi bildirimi, statü güncellemeleri ("Trendyol Elite", "Elite oldun").
-
-3. Kritik: Abonelik iptali veya ücretli yenileme uyarısı.
-
-
-
-ÖRNEKLER:
-
-- "Weekly Tech Digest" -> SIL (Bülten)
-
-- "Haftalık Bülten: Python Topluluğu" -> SIL (Bülten)
-
-- "Belediye: Ramazan iftar programı" -> SIL (Resmi/Genel Duyuru)
-
-- "TÜİK: Enflasyon verisi yayımlandı" -> SIL (Veri bülteni)
-
-- "Duolingo: Serin 45 güne ulaştı!" -> SIL (Gamification)
-
-- "Migros Hemen: Sepetinde ürünler var" -> SIL (Satış)
-
-- "IKEA Aile Puanlarınız siliniyor!" -> SIL (Sadakat)
-
-- "Substack: Yeni ücretli yazı" -> SIL (Toplu gönderim/Bülten)
-
-- "Profilini Tamamla, 100 TL Kazan" -> SIL (Strateji)
+Yanıt kuralları:
+- Decision sadece SIL veya TUT olmalı.
+- Reason 2-5 kelime olmalı.
+- JSON dışında hiçbir metin yazma.
 
 """
 
@@ -328,7 +456,7 @@ class OllamaConfig(BaseModel):
 
     timeout: int = 60
 
-    max_body_chars: int = 500
+    max_body_chars: int = 250
 
 
 
@@ -356,7 +484,7 @@ class LMStudioConfig(BaseModel):
 
     timeout: int = 60
 
-    max_body_chars: int = 500
+    max_body_chars: int = 250
 
 
 

@@ -33,7 +33,14 @@ def test_fast_analyze_junk(mock_patterns):
     meta = MailMeta(uid="1", subject="Special discount inside!", sender="promo@spam.com")
     result = fast_analyzer.fast_analyze(meta)
     assert result.decision == "SIL"
-    assert "heuristic:discount" in result.reason
+    assert result.reason.endswith(":discount")
+    assert result.reason.startswith("heuristic:")
+
+
+def test_extract_fast_category_from_reason():
+    assert fast_analyzer.extract_fast_category("heuristic:promotion:discount") == "promotion"
+    assert fast_analyzer.extract_fast_category("heuristic:discount") == "uncategorized"
+    assert fast_analyzer.extract_fast_category("whitelist:important") == ""
 
 
 def test_fast_analyze_no_match(mock_patterns):

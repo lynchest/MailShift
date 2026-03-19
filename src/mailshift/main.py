@@ -144,7 +144,7 @@ from .core.engine import (
 
 )
 
-from .db.database import save_mails_cache, load_mails_cache
+from .db.database import save_mails_cache, load_mails_cache_by_uids
 
 from .core.analyzers.pro import (
 
@@ -438,7 +438,9 @@ def main(
 
         resolved_mode.value, 
 
-        manual_workers=manual_workers
+        manual_workers=manual_workers,
+
+        backend=llm_backend
 
     )
 
@@ -602,13 +604,7 @@ def main(
 
 
 
-        # ---- check cache & list UIDs ----
-
-        cached_mails = load_mails_cache() or []
-
-        cached_dict = {m.uid: m for m in cached_mails}
-
-        
+        # ---- list UIDs then load only matching cached rows ----
 
         with console.status("[cyan]Listing messages…[/cyan]", spinner="dots"):
 
@@ -625,6 +621,12 @@ def main(
 
 
         console.print(f"[green]Found [bold]{len(current_uids)}[/bold] message(s) in INBOX.[/green]")
+
+        with console.status("[cyan]Loading matching cache rows…[/cyan]", spinner="dots"):
+
+            cached_mails = load_mails_cache_by_uids(current_uids)
+
+        cached_dict = {m.uid: m for m in cached_mails}
 
         
 
@@ -676,6 +678,8 @@ def main(
 
                 fetch_done = 0
 
+                fetch_pending = 0
+
                 fetch_total = len(missing_uids)
 
 
@@ -688,7 +692,11 @@ def main(
 
                     nonlocal fetch_done
 
+                    nonlocal fetch_pending
+
                     fetch_done += 1
+
+                    fetch_pending += 1
 
                     sender = clean_text(meta.sender, max_len=20)
 
@@ -708,13 +716,17 @@ def main(
 
 
 
-                    progress.update(
+                    if fetch_pending >= 10 or fetch_done == fetch_total:
 
-                        task, advance=1,
+                        progress.update(
 
-                        current=current_label
+                            task, advance=fetch_pending,
 
-                    )
+                            current=current_label
+
+                        )
+
+                        fetch_pending = 0
 
 
 
@@ -764,7 +776,11 @@ def main(
 
                 task = progress.add_task("fast", total=len(mails), current="Starting…")
 
-                for mail in mails:
+                fast_pending = 0
+
+                fast_total = len(mails)
+
+                for idx, mail in enumerate(mails, start=1):
 
                     res = fast_analyze(mail)
 
@@ -778,7 +794,13 @@ def main(
 
                     subj = clean_text(mail.subject, max_len=24)
 
-                    progress.update(task, advance=1, current=f"{icon} {subj}")
+                    fast_pending += 1
+
+                    if fast_pending >= 20 or idx == fast_total:
+
+                        progress.update(task, advance=fast_pending, current=f"{icon} {subj}")
+
+                        fast_pending = 0
 
 
 
@@ -805,6 +827,7 @@ def main(
             if sil_candidates:
 
                 from .core.analyzers.pro import pro_analyze
+                from .core.analyzers.fast import extract_fast_category
 
 
 
@@ -924,7 +947,14 @@ def main(
 
                         llm_cfg = cfg.lm_studio if cfg.llm_backend == "lm_studio" else cfg.ollama
 
-                        return idx, pro_analyze(candidate.mail, llm_cfg, cfg.llm_backend, fast_reason=candidate.reason, cancel_event=cancel_event)
+                        return idx, pro_analyze(
+                            candidate.mail,
+                            llm_cfg,
+                            cfg.llm_backend,
+                            fast_reason=candidate.reason,
+                            fast_category=extract_fast_category(candidate.reason),
+                            cancel_event=cancel_event,
+                        )
 
 
 
@@ -1090,6 +1120,12 @@ def main(
 
                 task = progress.add_task("analyze", total=len(mails), current="Starting…")
 
+                analyze_done = 0
+
+                analyze_pending = 0
+
+                analyze_total = len(mails)
+
 
 
                 def _on_analyze(result: ScanResult) -> None:
@@ -1098,13 +1134,25 @@ def main(
 
                     icon = "SIL" if result.decision == "SIL" else "TUT"
 
+                    nonlocal analyze_done
+
+                    nonlocal analyze_pending
+
+                    analyze_done += 1
+
+                    analyze_pending += 1
+
                     
 
                     # DÜZELTME: Satır sonu karakterlerinden arındırma
 
                     subj = clean_text(result.mail.subject, max_len=24)
 
-                    progress.update(task, advance=1, current=f"{icon} {subj}")
+                    if analyze_pending >= 20 or analyze_done == analyze_total:
+
+                        progress.update(task, advance=analyze_pending, current=f"{icon} {subj}")
+
+                        analyze_pending = 0
 
 
 

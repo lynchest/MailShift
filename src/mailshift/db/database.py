@@ -98,6 +98,46 @@ def load_mails_cache() -> Optional[list[MailMeta]]:
     except Exception:
         return None
 
+
+def load_mails_cache_by_uids(uids: list[str], batch_size: int = 500) -> list[MailMeta]:
+    """Load only cached MailMeta rows for the provided UID list.
+
+    The result preserves the order of *uids* for deterministic downstream
+    processing.
+    """
+    if not uids or not DB_FILE.exists():
+        return []
+    init_db()
+
+    rows_by_uid: dict[str, MailMeta] = {}
+    try:
+        with get_db_connection() as conn:
+            for i in range(0, len(uids), batch_size):
+                chunk = uids[i : i + batch_size]
+                placeholders = ",".join("?" for _ in chunk)
+                cursor = conn.execute(
+                    f"""
+                    SELECT uid, subject, sender, date, size_bytes, body_preview, has_attachment
+                    FROM mails_cache
+                    WHERE uid IN ({placeholders})
+                    """,
+                    chunk,
+                )
+                for r in cursor.fetchall():
+                    rows_by_uid[r[0]] = MailMeta(
+                        uid=r[0],
+                        subject=r[1],
+                        sender=r[2],
+                        date=r[3],
+                        size_bytes=r[4],
+                        body_preview=r[5],
+                        has_attachment=bool(r[6]),
+                    )
+    except Exception:
+        return []
+
+    return [rows_by_uid[uid] for uid in uids if uid in rows_by_uid]
+
 def clear_mails_cache() -> None:
     """Remove the SQLite database file."""
     DB_FILE.unlink(missing_ok=True)

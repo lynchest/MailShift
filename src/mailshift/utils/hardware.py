@@ -1,4 +1,4 @@
-﻿"""
+"""
 |
 hardware.py â€“ System hardware detection for optimal performance.
 
@@ -428,9 +428,11 @@ def detect_model_size(model_name: str) -> float:
 
 def get_vram_requirement(model_size_b: float) -> float:
 
-    if model_size_b <= 3: return 0.15
+    if model_size_b <= 1.0: return 0.10
 
-    if model_size_b <= 7: return 0.30
+    if model_size_b <= 3.0: return 0.15
+
+    if model_size_b <= 7.0: return 0.30
 
     return 0.60
 
@@ -446,7 +448,9 @@ def calculate_optimal_workers(
 
     system_info: Optional[SystemInfo] = None,
 
-    manual_workers: Optional[int] = None
+    manual_workers: Optional[int] = None,
+
+    backend: str = "ollama"
 
 ) -> int:
 
@@ -484,25 +488,45 @@ def calculate_optimal_workers(
 
 
 
-            # Hız (TPS) odaklı GPU işlem limiti (Compute-Bound)
+            base_ceiling = 2
 
-            if system_info.vram_total_gb >= 12.0:
+            if system_info.vram_total_gb >= 20.0:
 
-                ceiling = 6
+                base_ceiling = 8
+
+            elif system_info.vram_total_gb >= 12.0:
+
+                base_ceiling = 6
 
             elif system_info.vram_total_gb >= 8.0:
 
-                ceiling = 4 # RTX 2060S vb. için darboğaz sınırı
+                base_ceiling = 4
+
+
+
+            if model_size <= 1.0:
+
+                ceiling = base_ceiling * 3
+
+            elif model_size <= 3.0:
+
+                ceiling = base_ceiling * 2
 
             else:
 
-                ceiling = 2
+                ceiling = base_ceiling
+
+
+
+            if backend == "lm_studio":
+
+                ceiling = min(ceiling, 10)
 
 
 
             env_limit = os.environ.get("OLLAMA_NUM_PARALLEL")
 
-            if env_limit and env_limit.isdigit():
+            if env_limit and env_limit.isdigit() and backend == "ollama":
 
                 ceiling = int(env_limit)
 
@@ -520,11 +544,21 @@ def calculate_optimal_workers(
 
 
 
-        ram_per_worker = max(1.0, model_size * 1.5)
+        ram_per_worker = max(1.0, model_size * 1.2)
 
         max_by_ram = int(system_info.available_ram_gb / ram_per_worker)
 
-        return max(1, min(max_by_ram, system_info.cpu_count // 2, 4))
+        
+
+        cpu_ceiling = max(2, system_info.cpu_count - 2)
+
+        if backend == "lm_studio":
+
+            cpu_ceiling = min(cpu_ceiling, 6)
+
+            
+
+        return max(1, min(max_by_ram, cpu_ceiling))
 
         
 

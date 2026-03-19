@@ -14,7 +14,7 @@ import re
 
 
 
-from ...config.config import WHITELIST_PATTERN, JUNK_PATTERN
+from ...config.config import WHITELIST_PATTERN, JUNK_PATTERN, get_blacklist_category_for_match
 
 from ...models.models import MailMeta, ScanResult
 
@@ -44,9 +44,9 @@ _ALWAYS_KEEP_PATTERN = re.compile(
 
         |
 
-        # Google Drive / cloud storage quota fullness notices
+        # Google Drive / cloud storage / service quota fullness notices
 
-        (google\s*drive|gdrive|onedrive|icloud|drive)\b.{0,120}(dol[uı]|dolmak\s+[üu]zere|storage|depolama|quota|space\s+(?:is\s+)?(?:almost\s+)?full|kota)
+        (google\s*drive|gdrive|onedrive|icloud|drive|nextdns)\b.{0,120}(dol[uı]|dolmak\s+[üu]zere|storage|depolama|quota|space\s+(?:is\s+)?(?:almost\s+)?full|kota|limit|exceeded)
 
         |
 
@@ -79,6 +79,21 @@ def _normalize(text: str) -> str:
     return text.replace("İ", "i").lower()
 
 
+def extract_fast_category(reason: str) -> str:
+
+    if not reason.startswith("heuristic:"):
+
+        return ""
+
+    parts = reason.split(":", 2)
+
+    if len(parts) >= 3:
+
+        return parts[1]
+
+    return "uncategorized"
+
+
 
 
 
@@ -102,13 +117,23 @@ def fast_analyze(meta: MailMeta) -> ScanResult:
 
 
 
+    # Normalize once per field and reuse composed strings to reduce per-mail
+
+    # allocation/normalization overhead in large scans.
+
+    subject_text = _normalize(meta.subject)
+
+    sender_text = _normalize(meta.sender)
+
+    body_text = _normalize(meta.body_preview)
+
     # full_text includes sender for whitelist and safety-guard; content_text
 
     # excludes it for blacklist to prevent false positives from legitimate
 
     # automated senders (e.g. no-reply@github.com matching the "no-reply" rule).
 
-    full_text = _normalize(f"{meta.subject} {meta.sender} {meta.body_preview}")
+    full_text = f"{subject_text} {sender_text} {body_text}"
 
 
 
@@ -132,13 +157,17 @@ def fast_analyze(meta: MailMeta) -> ScanResult:
 
     if JUNK_PATTERN:
 
-        content_text = _normalize(f"{meta.subject} {meta.body_preview}")
+        content_text = f"{subject_text} {body_text}"
 
         match = JUNK_PATTERN.search(content_text)
 
         if match:
 
-            return ScanResult(mail=meta, decision="SIL", reason=f"heuristic:{match.group()}")
+            matched_token = match.group()
+
+            category = get_blacklist_category_for_match(matched_token)
+
+            return ScanResult(mail=meta, decision="SIL", reason=f"heuristic:{category}:{matched_token}")
 
 
 

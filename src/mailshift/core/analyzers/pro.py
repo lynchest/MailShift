@@ -1,4 +1,4 @@
-﻿"""
+"""
 
 pro_analyzer.py | LLM-based email analysis.
 
@@ -80,7 +80,7 @@ def _select_ollama_runtime_options(model_name: str) -> dict[str, int | float | b
 
     options: dict[str, int | float | bool] = {
 
-        "num_predict": 256,
+        "num_predict": 96,
 
         "temperature": 0.0,
 
@@ -100,11 +100,21 @@ def _select_ollama_runtime_options(model_name: str) -> dict[str, int | float | b
 
         model_size_b = detect_model_size(model_name)
 
+        parallel_requests = 1
+        env_parallel = os.getenv("OLLAMA_NUM_PARALLEL", "").strip()
+        if env_parallel.isdigit() and int(env_parallel) > 0:
+            parallel_requests = int(env_parallel)
+
 
 
         cpu_threads = max(2, min(12, max(1, system_info.cpu_count - 1)))
 
         options["num_thread"] = cpu_threads
+
+        if parallel_requests > 1:
+            # Prevent CPU oversubscription when multiple Ollama requests run concurrently.
+            per_request_cap = max(1, system_info.cpu_count // parallel_requests)
+            options["num_thread"] = max(1, min(int(options["num_thread"]), per_request_cap))
 
 
 
@@ -482,7 +492,13 @@ class LLMProvider(ABC):
 
     @abstractmethod
 
-    def analyze(self, meta: MailMeta, fast_reason: str = "", cancel_event: Optional[threading.Event] = None) -> ScanResult:
+    def analyze(
+        self,
+        meta: MailMeta,
+        fast_reason: str = "",
+        fast_category: str = "",
+        cancel_event: Optional[threading.Event] = None,
+    ) -> ScanResult:
 
         """Analyze an email and return a ScanResult."""
 
@@ -659,7 +675,12 @@ class OllamaProvider(LLMProvider):
 
     @staticmethod
 
-    def _build_user_prompt(meta: MailMeta, max_body_chars: int, fast_reason: str = "") -> str:
+    def _build_user_prompt(
+        meta: MailMeta,
+        max_body_chars: int,
+        fast_reason: str = "",
+        fast_category: str = "",
+    ) -> str:
 
         body = (meta.body_preview or "")[:max_body_chars]
 
@@ -667,7 +688,13 @@ class OllamaProvider(LLMProvider):
 
         if fast_reason:
 
-            hint = f"\nÖn Analiz (heuristik): Bu e-posta '{fast_reason}' kuralıyla SIL olarak işaretlendi.\n"
+            hint = f"\nÖn Analiz (heuristik): Bu e-posta '{fast_reason}' kuralıyla SIL olarak işaretlendi."
+
+            if fast_category:
+
+                hint += f" Kategori: {fast_category}."
+
+            hint += "\n"
 
         return (
 
@@ -685,13 +712,24 @@ class OllamaProvider(LLMProvider):
 
 
 
-    def analyze(self, meta: MailMeta, fast_reason: str = "", cancel_event: Optional[threading.Event] = None) -> ScanResult:
+    def analyze(
+        self,
+        meta: MailMeta,
+        fast_reason: str = "",
+        fast_category: str = "",
+        cancel_event: Optional[threading.Event] = None,
+    ) -> ScanResult:
 
         if cancel_event and cancel_event.is_set():
 
             return ScanResult(mail=meta, decision="TUT", reason="cancelled")
 
-        user_prompt = self._build_user_prompt(meta, self.cfg.max_body_chars, fast_reason)
+        user_prompt = self._build_user_prompt(
+            meta,
+            self.cfg.max_body_chars,
+            fast_reason,
+            fast_category,
+        )
 
         payload = {
 
@@ -707,29 +745,17 @@ class OllamaProvider(LLMProvider):
 
             "stream": False,
 
+            "keep_alive": -1,
+
             "think": self.cfg.use_think,
 
-            "format": {
-
-                "type": "object",
-
-                "properties": {
-
-                    "decision": {"type": "string", "enum": ["SIL", "TUT"]},
-
-                    "reason": {"type": "string"},
-
-                },
-
-                "required": ["decision"],
-
-            },
+            "format": "json",
 
             "options": {
 
                 **self.runtime_options,
 
-                "num_predict": 512 if self.cfg.use_think else 256, # More tokens if thinking
+                "num_predict": 512 if self.cfg.use_think else 96, # More tokens if thinking
 
             }
 
@@ -813,7 +839,12 @@ class LMStudioProvider(LLMProvider):
 
     @staticmethod
 
-    def _build_user_prompt(meta: MailMeta, max_body_chars: int, fast_reason: str = "") -> str:
+    def _build_user_prompt(
+        meta: MailMeta,
+        max_body_chars: int,
+        fast_reason: str = "",
+        fast_category: str = "",
+    ) -> str:
 
         body = (meta.body_preview or "")[:max_body_chars]
 
@@ -821,7 +852,13 @@ class LMStudioProvider(LLMProvider):
 
         if fast_reason:
 
-            hint = f"\nÖn Analiz (heuristik): Bu e-posta '{fast_reason}' kuralıyla SIL olarak işaretlendi.\n"
+            hint = f"\nÖn Analiz (heuristik): Bu e-posta '{fast_reason}' kuralıyla SIL olarak işaretlendi."
+
+            if fast_category:
+
+                hint += f" Kategori: {fast_category}."
+
+            hint += "\n"
 
         return (
 
@@ -839,13 +876,24 @@ class LMStudioProvider(LLMProvider):
 
 
 
-    def analyze(self, meta: MailMeta, fast_reason: str = "", cancel_event: Optional[threading.Event] = None) -> ScanResult:
+    def analyze(
+        self,
+        meta: MailMeta,
+        fast_reason: str = "",
+        fast_category: str = "",
+        cancel_event: Optional[threading.Event] = None,
+    ) -> ScanResult:
 
         if cancel_event and cancel_event.is_set():
 
             return ScanResult(mail=meta, decision="TUT", reason="cancelled")
 
-        user_prompt = self._build_user_prompt(meta, self.cfg.max_body_chars, fast_reason)
+        user_prompt = self._build_user_prompt(
+            meta,
+            self.cfg.max_body_chars,
+            fast_reason,
+            fast_category,
+        )
 
         payload = {
 
@@ -947,6 +995,8 @@ def pro_analyze(
 
     fast_reason: str = "",
 
+    fast_category: str = "",
+
     cancel_event: Optional[threading.Event] = None,
 
 ) -> ScanResult:
@@ -965,5 +1015,10 @@ def pro_analyze(
 
             _provider_cache[cache_key] = OllamaProvider(cfg)  # type: ignore[arg-type]
 
-    return _provider_cache[cache_key].analyze(meta, fast_reason=fast_reason, cancel_event=cancel_event)
+    return _provider_cache[cache_key].analyze(
+        meta,
+        fast_reason=fast_reason,
+        fast_category=fast_category,
+        cancel_event=cancel_event,
+    )
 

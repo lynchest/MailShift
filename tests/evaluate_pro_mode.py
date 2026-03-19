@@ -14,6 +14,7 @@ Reports:
 
 import argparse
 import json
+import os
 import time
 import sys
 from pathlib import Path
@@ -28,10 +29,23 @@ from mailshift.ui.styles import console
 from mailshift.models.models import MailMeta, ScanResult
 from mailshift.config.config import OllamaConfig, LMStudioConfig
 from mailshift.core.analyzers.fast import fast_analyze
+from mailshift.core.analyzers.fast import extract_fast_category
 from mailshift.core.analyzers.pro import pro_analyze, check_ollama_health, check_lm_studio_health
+from mailshift.utils.hardware import calculate_optimal_workers
 
-NUM_WORKERS = 4
 RESULTS_FILE = Path(__file__).parent / "eval_pro_mode_results.txt"
+
+
+def _resolve_workers(backend: str, cfg, cli_workers: int | None = None) -> int:
+    if cli_workers is not None and cli_workers > 0:
+        return cli_workers
+
+    if backend == "ollama":
+        env_parallel = os.getenv("OLLAMA_NUM_PARALLEL", "").strip()
+        if env_parallel.isdigit() and int(env_parallel) > 0:
+            return int(env_parallel)
+            
+    return calculate_optimal_workers(cfg.model, mode="pro", backend=backend)
 
 
 def _evaluate_item(item, cfg, backend):
@@ -58,6 +72,7 @@ def _evaluate_item(item, cfg, backend):
             meta, cfg,
             backend=backend,
             fast_reason=fast_res.reason if fast_res.decision == "SIL" else "",
+            fast_category=extract_fast_category(fast_res.reason) if fast_res.decision == "SIL" else "",
         )
         ai_elapsed = time.perf_counter() - ai_start
         pro_mode_res = ai_res
@@ -138,7 +153,7 @@ def _latency_stats(results):
     return avg, mn, mx, p95
 
 
-def evaluate(backend="ollama"):
+def evaluate(backend="ollama", workers: int | None = None):
     dataset_path = Path(__file__).parent / "test_ai_dataset.json"
     if not dataset_path.exists():
         console.print(f"[bold red]Dataset not found at {dataset_path}[/bold red]")
@@ -161,8 +176,10 @@ def evaluate(backend="ollama"):
         console.print(f"[bold red]{backend_label} check failed: {msg}[/bold red]")
         return
 
+    num_workers = _resolve_workers(backend, cfg, workers)
+
     console.print(f"[bold cyan]Starting Full Pro Mode Simulation on {len(dataset)} messages...[/bold cyan]")
-    console.print(f"Backend: [green]{backend_label}[/green] | Model: [green]{cfg.model}[/green] | Workers: [green]{NUM_WORKERS}[/green]\n")
+    console.print(f"Backend: [green]{backend_label}[/green] | Model: [green]{cfg.model}[/green] | Workers: [green]{num_workers}[/green]\n")
 
     # Load previous results for regression diff
     prev_results = _load_previous_results(RESULTS_FILE)
@@ -170,7 +187,7 @@ def evaluate(backend="ollama"):
     results = []
     start_time = time.time()
 
-    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(_evaluate_item, item, cfg, backend): item for item in dataset}
         for future in as_completed(futures):
             results.append(future.result())
@@ -318,5 +335,11 @@ if __name__ == "__main__":
         default="ollama",
         help="LLM backend to use (default: ollama)",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Parallel worker count override (default: backend-aware auto)",
+    )
     args = parser.parse_args()
-    evaluate(backend=args.backend)
+    evaluate(backend=args.backend, workers=args.workers)

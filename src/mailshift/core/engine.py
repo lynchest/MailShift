@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import email
 import email.header
@@ -317,6 +317,7 @@ class MailEngine:
         results: list[MailMeta] = []
         chunks = list(chunk_list(pending, rl.fetch_chunk_size))
         total_chunks = len(chunks)
+        chunk_delay = max(0.0, rl.chunk_delay)
 
         log.info(
             f"Fetching headers for {len(pending)} messages "
@@ -324,6 +325,9 @@ class MailEngine:
         )
 
         for chunk_idx, chunk in enumerate(chunks, start=1):
+            chunk_started = time.perf_counter()
+            had_retry = False
+
             def _fetch(c=chunk):
                 return _fetch_mails_bulk(
                     self._conn,  # type: ignore[arg-type]
@@ -332,12 +336,17 @@ class MailEngine:
                     max_body_chars=self.cfg.ollama.max_body_chars,
                 )
 
+            def _on_fetch_error(exc: Exception, attempt: int, lbl: str) -> None:
+                nonlocal had_retry
+                had_retry = True
+                self._recover_connection(exc, lbl, attempt)
+
             try:
                 chunk_results = _with_retry(
                     _fetch, rl, label=f"fetch chunk {chunk_idx}/{total_chunks}",
                     on_error=lambda exc, attempt, lbl=(
                         f"fetch chunk {chunk_idx}/{total_chunks}"
-                    ): self._recover_connection(exc, lbl, attempt),
+                    ): _on_fetch_error(exc, attempt, lbl),
                 )
             except Exception as exc:
                 log.error(
@@ -345,6 +354,8 @@ class MailEngine:
                     f"skipping {len(chunk)} UIDs: {exc}"
                 )
                 chunk_results = []
+
+            chunk_elapsed = time.perf_counter() - chunk_started
 
             for meta in chunk_results:
                 results.append(meta)
@@ -357,9 +368,16 @@ class MailEngine:
                 # Incremental batch-commit to SQLite cache
                 save_mails_cache(chunk_results, batch_size=rl.db_batch_size)
 
-            # Rate limiting: brief pause between consecutive IMAP requests
-            if chunk_idx < total_chunks and rl.chunk_delay > 0:
-                time.sleep(rl.chunk_delay)
+            # Adaptive pacing: reduce delay on stable chunks, increase after
+            # retries to stay server-friendly under transient failures.
+            if had_retry:
+                base = max(chunk_delay, rl.chunk_delay)
+                chunk_delay = min(0.5, (base * 1.5) + 0.01)
+            elif chunk_elapsed < 0.4 and chunk_delay > 0:
+                chunk_delay = max(0.0, (chunk_delay * 0.85) - 0.005)
+
+            if chunk_idx < total_chunks and chunk_delay > 0:
+                time.sleep(chunk_delay)
 
         log.info(f"Successfully fetched {len(results)} message headers")
         return results
@@ -487,7 +505,8 @@ class MailEngine:
         max_workers = calculate_optimal_workers(
             self.cfg.ollama.model,
             self.cfg.mode.value,
-            manual_workers=self.cfg.max_workers
+            manual_workers=self.cfg.max_workers,
+            backend=self.cfg.llm_backend
         )
         
         llm_results: list[ScanResult | None] = [None] * len(sil_candidates)

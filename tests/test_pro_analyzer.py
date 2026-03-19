@@ -142,7 +142,7 @@ def test_select_ollama_runtime_options_gpu(monkeypatch):
 def test_ollama_provider_uses_dynamic_runtime_options():
     cfg = OllamaConfig(model="test_model", base_url="http://test")
     expected_options = {
-        "num_predict": 256,
+        "num_predict": 96,
         "temperature": 0.0,
         "num_thread": 6,
         "num_gpu": 32,
@@ -187,11 +187,30 @@ def test_pro_analyze_always_routes_to_provider_even_for_known_patterns():
 
 def test_default_prompt_contains_typical_examples():
     expected_phrases = [
-        "Sen bir e-posta temizleme asistanısın",
-        "KRİTİK SIL (KESİNLİKLE SİLİNECEKLER):",
-        "KRİTİK TUT (ASLA SİLME):",
-        "JSON formatında cevap ver",
+        "MailShift için e-posta sınıflandırması yap",
+        "Yalnızca geçerli JSON döndür",
+        "Decision sadece SIL veya TUT olmalı",
     ]
 
     for phrase in expected_phrases:
         assert phrase in DEFAULT_SYSTEM_PROMPT
+
+
+def test_ollama_prompt_includes_fast_category_hint():
+    cfg = OllamaConfig(model="test_model", base_url="http://test")
+    provider = pro_analyzer.OllamaProvider(cfg)
+    meta = MailMeta(uid="1", subject="Buy now", sender="test@test.com", body_preview="Sale sale sale")
+
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"message": {"content": "{\"decision\":\"SIL\"}"}}
+        mock_session.post.return_value = mock_resp
+
+        provider.analyze(meta, fast_reason="heuristic:promotion:discount", fast_category="promotion")
+
+        sent_payload = mock_session.post.call_args.kwargs["json"]
+        user_content = sent_payload["messages"][1]["content"]
+        assert "Kategori: promotion" in user_content
