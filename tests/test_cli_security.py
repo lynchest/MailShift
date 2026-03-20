@@ -22,7 +22,7 @@ import pytest
 # Mock internal package imports
 sys.modules["mailshift.config.config"] = MagicMock()
 sys.modules["mailshift.ui.styles"] = MagicMock()
-sys.modules["mailshift.utils.paths"] = MagicMock()
+
 
 from mailshift.ui.cli import install_ollama
 
