@@ -28,6 +28,9 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
         - Robust decision parser accepts `SIL/TUT` text or JSON-style outputs and normalizes Turkish `SİL/SIL` variants
         - Ollama call uses `/api/chat` with structured JSON decision output for better small-model reliability
         - Pro mode disables model "thinking" output and uses a larger generation budget to prevent empty decision responses on 2B/4B models
+    - **LM Studio auto-download support**: If no LM Studio model is loaded, interactive Pro mode can trigger LM Studio's download API (`/api/v1/models/download`) and track progress via `/api/v1/models/download/status`
+    - **LM Studio install options**: If LM Studio is missing, interactive Pro mode can offer Windows install via `winget install ElementLabs.LMStudio` or direct download from the official website (`https://lmstudio.ai`)
+    - **LM Studio server lifecycle**: If LM Studio is installed but local server is not running, MailShift can auto-run `lms server start`; if it started the server itself, it attempts `lms server stop` during cleanup
 - **Body preview in Pro mode**: Fetches email body content for better LLM analysis
 - **Dry-run default** – preview before any deletion
 - **OS Keyring** (Windows Credential Manager) — stores provider-based credentials securely via the `keyring` library for the interactive "reuse previous credentials" prompt. No longer stored in plain-text JSON files.

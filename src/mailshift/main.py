@@ -194,6 +194,8 @@ from .ui.cli import (
 
     cleanup_ollama_if_it_was_started_by_us,
 
+    cleanup_lm_studio_if_it_was_started_by_us,
+
 )
 
 
@@ -1413,6 +1415,12 @@ def main(
         if 'cfg' in locals() and cfg and cfg.llm_backend == "lm_studio":
 
             unload_lm_studio_models(cfg.lm_studio.base_url, cfg.lm_studio.model)
+
+
+
+        # Eğer LM Studio server'ı biz başlattıysak kapat
+
+        cleanup_lm_studio_if_it_was_started_by_us()
 
 
 

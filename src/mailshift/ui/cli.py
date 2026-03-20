@@ -12,6 +12,8 @@ import sys
 
 import time
 
+import webbrowser
+
 from pathlib import Path
 
 from typing import Optional
@@ -77,6 +79,8 @@ import keyring
 _KEYRING_SERVICE = "MailShift"  # Windows Credential Manager'da görünen servis adı
 
 _OLLAMA_STARTED_BY_US = False  # Track if we started Ollama automatically
+
+_LM_STUDIO_SERVER_STARTED_BY_US = False  # Track if we started LM Studio server automatically
 
 
 
@@ -263,6 +267,284 @@ def check_ollama_installed() -> bool:
     """Check if Ollama is installed on the system."""
 
     return shutil.which("ollama") is not None
+
+
+
+def check_lm_studio_installed() -> bool:
+
+    """Best-effort check for LM Studio installation on the system."""
+
+    if shutil.which("lms") is not None:
+
+        return True
+
+
+
+    if sys.platform != "win32":
+
+        return False
+
+
+
+    if shutil.which("winget") is None:
+
+        return False
+
+
+
+    try:
+
+        result = subprocess.run(
+
+            ["winget", "list", "--id", "ElementLabs.LMStudio", "-e"],
+
+            capture_output=True,
+
+            text=True,
+
+            timeout=20,
+
+        )
+
+        output = (result.stdout or "") + "\n" + (result.stderr or "")
+
+        return "ElementLabs.LMStudio" in output
+
+    except Exception:
+
+        return False
+
+
+
+def open_lm_studio_download_page() -> bool:
+
+    """Open LM Studio download page in default browser."""
+
+    try:
+
+        return webbrowser.open("https://lmstudio.ai", new=2)
+
+    except Exception:
+
+        return False
+
+
+
+def install_lm_studio_windows() -> bool:
+
+    """Install LM Studio on Windows with winget."""
+
+    if sys.platform != "win32":
+
+        console.print("[red]Otomatik LM Studio kurulumu şu an sadece Windows için destekleniyor.[/red]")
+
+        return False
+
+
+
+    if shutil.which("winget") is None:
+
+        console.print("[red]winget bulunamadı. Lütfen LM Studio'yu siteden indirip kurun: https://lmstudio.ai[/red]")
+
+        return False
+
+
+
+    console.print("\n[bold yellow]LM Studio winget ile kuruluyor...[/bold yellow]")
+
+    console.print("[dim]Komut: winget install ElementLabs.LMStudio[/dim]\n")
+
+
+
+    try:
+
+        process = subprocess.Popen(
+
+            [
+
+                "winget",
+
+                "install",
+
+                "--id",
+
+                "ElementLabs.LMStudio",
+
+                "-e",
+
+                "--accept-package-agreements",
+
+                "--accept-source-agreements",
+
+            ],
+
+            stdout=sys.stdout,
+
+            stderr=sys.stderr,
+
+        )
+
+        process.wait()
+
+
+
+        if process.returncode == 0:
+
+            console.print("\n[bold green]✔ LM Studio başarıyla kuruldu.[/bold green]")
+
+            console.print("[yellow]Lütfen LM Studio'yu açın, Local Server'ı başlatın ve tekrar deneyin.[/yellow]")
+
+            return True
+
+
+
+        console.print(f"\n[bold red]✘ LM Studio kurulumu başarısız oldu (Exit Code: {process.returncode}).[/bold red]")
+
+        return False
+
+    except Exception as exc:
+
+        console.print(f"\n[bold red]✘ LM Studio kurulumu başlatılamadı:[/bold red] {exc}")
+
+        return False
+
+
+
+def _is_lm_studio_server_running(base_url: str = "http://localhost:1234") -> bool:
+
+    """Check whether LM Studio local server endpoint is reachable."""
+
+    try:
+
+        import requests
+
+        resp = requests.get(f"{base_url}/v1/models", timeout=3)
+
+        return resp.status_code == 200
+
+    except Exception:
+
+        return False
+
+
+
+def start_lm_studio_server(base_url: str = "http://localhost:1234", max_retries: int = 5, retry_delay: int = 2) -> bool:
+
+    """Start LM Studio server via CLI if it is installed but not running."""
+
+    global _LM_STUDIO_SERVER_STARTED_BY_US
+
+    if _is_lm_studio_server_running(base_url=base_url):
+
+        return True
+
+
+
+    if shutil.which("lms") is None:
+
+        return False
+
+
+
+    console.print("[yellow]LM Studio server kapalı görünüyor, lms server start deneniyor...[/yellow]")
+
+    try:
+
+        if sys.platform == "win32":
+
+            creation_flags = 0x08000000  # CREATE_NO_WINDOW
+
+            subprocess.Popen(
+
+                ["lms", "server", "start"],
+
+                stdout=subprocess.DEVNULL,
+
+                stderr=subprocess.DEVNULL,
+
+                stdin=subprocess.DEVNULL,
+
+                creationflags=creation_flags,
+
+                close_fds=True,
+
+            )
+
+        else:
+
+            subprocess.Popen(
+
+                ["lms", "server", "start"],
+
+                stdout=subprocess.DEVNULL,
+
+                stderr=subprocess.DEVNULL,
+
+                start_new_session=True,
+
+            )
+
+    except Exception:
+
+        return False
+
+
+
+    for _ in range(max_retries):
+
+        time.sleep(retry_delay)
+
+        if _is_lm_studio_server_running(base_url=base_url):
+
+            _LM_STUDIO_SERVER_STARTED_BY_US = True
+
+            console.print("[green]LM Studio server otomatik başlatıldı.[/green]")
+
+            return True
+
+
+
+    return False
+
+
+
+def cleanup_lm_studio_if_it_was_started_by_us() -> None:
+
+    """Stop LM Studio server if this session started it."""
+
+    if not _LM_STUDIO_SERVER_STARTED_BY_US:
+
+        return
+
+
+
+    if shutil.which("lms") is None:
+
+        return
+
+
+
+    console.print("[cyan]LM Studio server bu oturumda başlatılmıştı, şimdi durduruluyor...[/cyan]")
+
+    try:
+
+        subprocess.run(
+
+            ["lms", "server", "stop"],
+
+            stdout=subprocess.DEVNULL,
+
+            stderr=subprocess.DEVNULL,
+
+            timeout=15,
+
+        )
+
+    except Exception:
+
+        # Sessizce geç, cleanup aşaması ana akışı bozmasın.
+
+        pass
 
 
 
@@ -822,6 +1104,319 @@ def get_lm_studio_models(base_url: str = "http://localhost:1234", timeout: int =
 
 
 
+def _extract_lm_studio_status_payload(payload: object, model_name: str) -> dict:
+
+    """Extract a status object from possible LM Studio status response shapes."""
+
+    if isinstance(payload, dict):
+
+        downloads = payload.get("downloads")
+
+        if isinstance(downloads, list) and downloads:
+
+            for item in downloads:
+
+                if not isinstance(item, dict):
+
+                    continue
+
+                item_model = str(item.get("model") or item.get("model_id") or item.get("id") or "")
+
+                if item_model.lower() == model_name.lower():
+
+                    return item
+
+            first = downloads[0]
+
+            if isinstance(first, dict):
+
+                return first
+
+        status_obj = payload.get("download")
+
+        if isinstance(status_obj, dict):
+
+            return status_obj
+
+        return payload
+
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+
+        return payload[0]
+
+    return {}
+
+
+
+def _parse_lm_studio_download_status(payload: object, model_name: str) -> tuple[str, float, bool, bool, str]:
+
+    """Parse LM Studio download status.
+
+    Returns: (status_text, percent, is_done, is_failed, error_message)
+    """
+
+    item = _extract_lm_studio_status_payload(payload, model_name)
+
+    status_raw = str(item.get("status") or item.get("state") or item.get("phase") or "").strip()
+
+    message = str(item.get("message") or item.get("detail") or "").strip()
+
+    error = str(item.get("error") or "").strip()
+
+    progress_raw = item.get("progress")
+
+    percent = 0.0
+
+    if isinstance(progress_raw, (int, float)):
+
+        percent = float(progress_raw)
+
+        if percent <= 1.0:
+
+            percent *= 100.0
+
+    elif isinstance(progress_raw, str):
+
+        clean = progress_raw.replace("%", "").strip()
+
+        try:
+
+            percent = float(clean)
+
+            if percent <= 1.0:
+
+                percent *= 100.0
+
+        except ValueError:
+
+            percent = 0.0
+
+    total = item.get("total")
+
+    completed = item.get("completed")
+
+    if percent <= 0 and isinstance(total, (int, float)) and isinstance(completed, (int, float)) and total:
+
+        percent = (float(completed) / float(total)) * 100.0
+
+    status_lower = status_raw.lower()
+
+    is_done = status_lower in {
+
+        "completed", "complete", "success", "succeeded", "finished", "ready", "downloaded"
+
+    }
+
+    is_failed = status_lower in {"failed", "error", "cancelled", "canceled"}
+
+    if is_done:
+
+        percent = max(percent, 100.0)
+
+    percent = min(max(percent, 0.0), 100.0)
+
+    status_text = status_raw or message or "İndiriliyor"
+
+    error_message = error or (message if is_failed else "")
+
+    return status_text, percent, is_done, is_failed, error_message
+
+
+
+def download_lm_studio_model(
+
+    model_name: str,
+
+    base_url: str = "http://localhost:1234",
+
+    timeout_seconds: int = 1800,
+
+    poll_interval_seconds: float = 2.0,
+
+) -> bool:
+
+    """Download a model from Hugging Face through LM Studio's download API."""
+
+    import requests
+
+    model_name = model_name.strip()
+
+    if not model_name:
+
+        console.print("[bold red]✘ Model adı boş olamaz.[/bold red]")
+
+        return False
+
+    console.print(
+
+        f"\n[bold yellow]LM Studio model indiriliyor:[/bold yellow] [bold cyan]{model_name}[/bold cyan]"
+
+    )
+
+    try:
+
+        start_resp = requests.post(
+
+            f"{base_url}/api/v1/models/download",
+
+            json={"source": "huggingface", "model": model_name},
+
+            timeout=30,
+
+        )
+
+        start_resp.raise_for_status()
+
+    except Exception as exc:
+
+        console.print(f"[bold red]✘ LM Studio indirme başlatılamadı:[/bold red] {exc}")
+
+        return False
+
+    started_at = time.time()
+
+    try:
+
+        with Progress(
+
+            SpinnerColumn(),
+
+            TextColumn("[progress.description]{task.description}"),
+
+            BarColumn(),
+
+            TaskProgressColumn(),
+
+            TimeElapsedColumn(),
+
+            console=console,
+
+            transient=True,
+
+        ) as progress:
+
+            task = progress.add_task(f"İndiriliyor {model_name}...", total=100)
+
+            while True:
+
+                if time.time() - started_at > timeout_seconds:
+
+                    console.print(f"[bold red]✘ {model_name} indirme zaman aşımına uğradı.[/bold red]")
+
+                    return False
+
+                try:
+
+                    status_resp = requests.get(
+
+                        f"{base_url}/api/v1/models/download/status",
+
+                        timeout=10,
+
+                    )
+
+                    status_resp.raise_for_status()
+
+                    status_payload = status_resp.json()
+
+                except Exception:
+
+                    progress.update(task, description="Durum alınıyor...")
+
+                    time.sleep(poll_interval_seconds)
+
+                    continue
+
+                status_text, percent, is_done, is_failed, error_message = _parse_lm_studio_download_status(
+
+                    status_payload, model_name
+
+                )
+
+                progress.update(task, completed=percent, description=status_text)
+
+                if is_done:
+
+                    progress.update(task, completed=100)
+
+                    console.print(f"[bold green]✔ {model_name} başarıyla indirildi![/bold green]")
+
+                    return True
+
+                if is_failed:
+
+                    failure_text = error_message or "Bilinmeyen hata"
+
+                    console.print(f"[bold red]✘ LM Studio model indirme hatası:[/bold red] {failure_text}")
+
+                    return False
+
+                time.sleep(poll_interval_seconds)
+
+    except Exception as exc:
+
+        console.print(f"[bold red]✘ Model indirilirken hata oluştu:[/bold red] {exc}")
+
+        return False
+
+
+
+def ensure_lm_studio_model(
+
+    model_name: str,
+
+    available_models: list[str] | None = None,
+
+    base_url: str = "http://localhost:1234",
+
+    max_attempts: int = 2,
+
+) -> bool:
+
+    """Ensure a model exists in LM Studio by auto-downloading when missing."""
+
+    current = available_models if available_models is not None else get_lm_studio_models(base_url=base_url)
+
+    if any(model_name.lower() == m.lower() for m in current):
+
+        return True
+
+    for attempt in range(1, max_attempts + 1):
+
+        console.print(
+
+            f"[cyan]{model_name} LM Studio listesinde yok. Otomatik indirme başlatılıyor "
+
+            f"({attempt}/{max_attempts}).[/cyan]"
+
+        )
+
+        if not download_lm_studio_model(model_name, base_url=base_url):
+
+            continue
+
+        refreshed = get_lm_studio_models(base_url=base_url, timeout=8)
+
+        if any(model_name.lower() == m.lower() for m in refreshed):
+
+            return True
+
+        console.print(
+
+            f"[yellow]{model_name} indirildi ama listede doğrulanamadı. Tekrar deneniyor...[/yellow]"
+
+        )
+
+    console.print(
+
+        f"[bold red]✘ {model_name} LM Studio ile otomatik indirilemedi veya doğrulanamadı.[/bold red]"
+
+    )
+
+    return False
+
+
+
 def prompt_llm_backend() -> str:
 
     """Ask user which LLM backend to use for Pro mode. Returns 'ollama' or 'lm_studio'."""
@@ -858,21 +1453,79 @@ def _prompt_lm_studio_flow() -> tuple[Mode, str, str, Optional[int]]:
 
 
 
+    if not available_models and check_lm_studio_installed() and not _is_lm_studio_server_running():
+
+        start_lm_studio_server()
+
+        available_models = get_lm_studio_models(timeout=8)
+
+
+
+    if not available_models and not check_lm_studio_installed():
+
+        console.print(Panel(
+
+            "[bold yellow]LM Studio sistemde bulunamadı.[/bold yellow]\n\n"
+
+            "LM Studio kurmak için bir yöntem seçin:\n"
+
+            "[bold]1)[/bold] winget ile kur [dim](winget install ElementLabs.LMStudio)[/dim]\n"
+
+            "[bold]2)[/bold] Resmi siteden indir [dim](https://lmstudio.ai)[/dim]\n"
+
+            "[bold]3)[/bold] Kurulumu atla",
+
+            title="[bold red]LM Studio Kurulu Değil[/bold red]",
+
+            border_style="red",
+
+            box=box.ROUNDED,
+
+        ))
+
+
+
+        install_choice = Prompt.ask("[bold]Kurulum seçeneği[/bold]", choices=["1", "2", "3"], default="1")
+
+
+
+        if install_choice == "1":
+
+            install_lm_studio_windows()
+
+        elif install_choice == "2":
+
+            opened = open_lm_studio_download_page()
+
+            if opened:
+
+                console.print("[green]Tarayıcıda LM Studio indirme sayfası açıldı.[/green]")
+
+            else:
+
+                console.print("[yellow]Tarayıcı açılamadı. Lütfen manuel gidin: https://lmstudio.ai[/yellow]")
+
+        else:
+
+            console.print("[yellow]LM Studio kurulumu atlandı.[/yellow]")
+
+
+
     if not available_models:
 
         console.print(Panel(
 
             "[bold yellow]LM Studio'ya bağlanılamadı veya hiç model yüklü değil![/bold yellow]\n\n"
 
-            "LM Studio'yu başlatın ve bir model başlatın:\n"
+            "Otomatik indirme için LM Studio açık olmalı ve Local Server başlatılmalıdır.\n"
 
             "[bold]1)[/bold] LM Studio'yu açın\n"
 
-            "[bold]2)[/bold] Sol menüden bir model indirin\n"
+            "[bold]2)[/bold] 'Local Server' sekmesinden 'Start Server' butonuna tıklayın\n"
 
-            "[bold]3)[/bold] 'Local Server' sekmesinden 'Start Server' butonuna tıklayın\n"
+            "[bold]3)[/bold] İsterseniz modeli buradan otomatik indirtin\n"
 
-            "[bold]4)[/bold] Enter'a basarak tekrar deneyin",
+            "[bold]4)[/bold] Olmazsa Enter ile modeli yeniden listeleyin",
 
             title="[bold red]LM Studio Gerekli[/bold red]",
 
@@ -882,9 +1535,33 @@ def _prompt_lm_studio_flow() -> tuple[Mode, str, str, Optional[int]]:
 
         ))
 
-        Prompt.ask("[dim]LM Studio başlatıldıktan sonra Enter'a basın[/dim]")
+        auto_download = Confirm.ask(
 
-        available_models = get_lm_studio_models()
+            "[bold]Hugging Face üzerinden model otomatik indirilsin mi?[/bold]",
+
+            default=True,
+
+        )
+
+        if auto_download:
+
+            model_to_download = Prompt.ask(
+
+                "[bold cyan]Hugging Face model adı[/bold cyan]"
+
+                " [dim](ör: Qwen/Qwen3-0.6B-GGUF)[/dim]"
+
+            ).strip()
+
+            if model_to_download and ensure_lm_studio_model(model_to_download, available_models=available_models):
+
+                available_models = get_lm_studio_models(timeout=8)
+
+        if not available_models:
+
+            Prompt.ask("[dim]LM Studio hazırsa Enter'a basıp modeli tekrar listeleyin[/dim]")
+
+            available_models = get_lm_studio_models()
 
 
 
