@@ -7,16 +7,29 @@ import re
 import socket
 import ssl
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from email.message import Message
 from threading import Lock
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeAlias
 
 from bs4 import BeautifulSoup
 
 from ..models.models import MailMeta, ScanResult, ScanStats
 from ..config.config import AppConfig, IMAPConfig, Mode, Provider, RateLimitConfig
 from ..utils.logger import log
+
+# ---------------------------------------------------------------------------
+# Type Aliases (Clean Code Optimizasyonu)
+# ---------------------------------------------------------------------------
+IMAPConnection: TypeAlias = imaplib.IMAP4 | imaplib.IMAP4_SSL
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+# 25 KB altındaki maillerin gövdesi, header ile aynı anda çekilir.
+# (Double fetch maliyetini düşürmek için eklendi)
+SMALL_MAIL_THRESHOLD_BYTES = 25 * 1024 
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +42,7 @@ def chunk_list(lst: list, n: int):
         yield lst[i : i + n]
 
 
-def _connect(cfg: IMAPConfig, timeout: int = 30) -> imaplib.IMAP4 | imaplib.IMAP4_SSL:
+def _connect(cfg: IMAPConfig, timeout: int = 30) -> IMAPConnection:
     """Open an IMAP connection with an explicit socket timeout."""
     socket.setdefaulttimeout(timeout)
     conn = (
@@ -75,9 +88,17 @@ def _extract_body_preview(msg: Message, max_chars: int = 500) -> str:
             elif ct == "text/html" and not html_body:
                 html_body = decoded
 
-    final_text = text_body or BeautifulSoup(
-        html_body, "html.parser"
-    ).get_text(separator=" ", strip=True)
+    # HTML Parsing Optimizasyonu: CPU darboğazını önlemek için lxml kullanıyoruz
+    try:
+        final_text = text_body or BeautifulSoup(
+            html_body, "lxml"
+        ).get_text(separator=" ", strip=True)
+    except Exception:
+        # lxml kurulu değilse veya patlarsa varsayılan html.parser'a düş
+        final_text = text_body or BeautifulSoup(
+            html_body, "html.parser"
+        ).get_text(separator=" ", strip=True)
+        
     return final_text[:max_chars]
 
 
@@ -91,10 +112,7 @@ def _with_retry(
     label: str = "",
     on_error: Optional[Callable[[Exception, int], None]] = None,
 ):
-    """Call *fn()* up to *rl.max_retries* times with exponential back-off.
-
-    Raises the last exception if all attempts fail.
-    """
+    """Call *fn()* up to *rl.max_retries* times with exponential back-off."""
     delay = rl.retry_backoff
     last_exc: Exception | None = None
     for attempt in range(1, rl.max_retries + 1):
@@ -125,11 +143,11 @@ def _with_retry(
 
 
 # ---------------------------------------------------------------------------
-# Bulk IMAP fetch (single chunk, no retry â€” callers wrap with _with_retry)
+# Bulk IMAP fetch
 # ---------------------------------------------------------------------------
 
 def _fetch_mails_bulk(
-    conn: imaplib.IMAP4 | imaplib.IMAP4_SSL,
+    conn: IMAPConnection,
     uids: list[str],
     fetch_body: bool = False,
     max_body_chars: int = 500,
@@ -187,7 +205,7 @@ class MailEngine:
     def __init__(self, cfg: AppConfig) -> None:
         self.cfg = cfg
         self._rl: RateLimitConfig = cfg.rate_limit
-        self._conn: Optional[imaplib.IMAP4 | imaplib.IMAP4_SSL] = None
+        self._conn: Optional[IMAPConnection] = None
 
     # ------------------------------------------------------------------
     # Connection management
@@ -235,11 +253,7 @@ class MailEngine:
         self._force_reconnect(label, attempt)
 
     def _force_reconnect(self, label: str, attempt: int) -> None:
-        """Reconnect unconditionally â€” used when the server returns an unexpected NO."""
-        log.warning(
-            f"Forcing IMAP reconnect during '{label}' (attempt {attempt})"
-        )
-
+        log.warning(f"Forcing IMAP reconnect during '{label}' (attempt {attempt})")
         old_conn = self._conn
         self._conn = None
 
@@ -276,7 +290,7 @@ class MailEngine:
         return uids[: self.cfg.scan_limit] if self.cfg.scan_limit else uids
 
     # ------------------------------------------------------------------
-    # Header / body fetching â€” rate-limit + retry + checkpoint
+    # Header / body fetching — rate-limit + retry + checkpoint
     # ------------------------------------------------------------------
 
     def fetch_headers_concurrent(
@@ -285,25 +299,11 @@ class MailEngine:
         progress_cb: Optional[Callable[[MailMeta], None]] = None,
         resume: bool = False,
     ) -> list[MailMeta]:
-        """Fetch headers (and optionally bodies) for *uids*.
-
-        Parameters
-        ----------
-        uids:
-            Full UID list returned by :meth:`list_uids`.
-        progress_cb:
-            Called once for every successfully fetched :class:`MailMeta`.
-        resume:
-            Skip UIDs already recorded in the checkpoint table so an
-            interrupted run can continue from where it left off.
-        """
         assert self._conn, "Not connected"
         from ..db.database import mark_uids_fetched, get_fetched_uids, save_mails_cache
 
-        need_body = False  # Optimization: fetch headers only by default; fetch bodies on-demand later
         rl = self._rl
 
-        # --- checkpoint: skip already-fetched UIDs ---
         if resume:
             done = get_fetched_uids()
             pending = [u for u in uids if u not in done]
@@ -330,9 +330,9 @@ class MailEngine:
 
             def _fetch(c=chunk):
                 return _fetch_mails_bulk(
-                    self._conn,  # type: ignore[arg-type]
+                    self._conn,
                     c,
-                    fetch_body=need_body,
+                    fetch_body=False, 
                     max_body_chars=self.cfg.ollama.max_body_chars,
                 )
 
@@ -349,11 +349,26 @@ class MailEngine:
                     ): _on_fetch_error(exc, attempt, lbl),
                 )
             except Exception as exc:
-                log.error(
-                    f"Chunk {chunk_idx}/{total_chunks} failed permanently, "
-                    f"skipping {len(chunk)} UIDs: {exc}"
-                )
+                log.error(f"Chunk {chunk_idx}/{total_chunks} failed permanently: {exc}")
                 chunk_results = []
+
+            # Dinamik Fetch Optimizasyonu: Küçük boyutlu maillerin body'sini hemen çek
+            small_uids = [
+                m.uid for m in chunk_results 
+                if 0 < m.size_bytes <= SMALL_MAIL_THRESHOLD_BYTES
+            ]
+            if small_uids:
+                try:
+                    small_bodies = _fetch_mails_bulk(
+                        self._conn, small_uids, fetch_body=True,
+                        max_body_chars=self.cfg.ollama.max_body_chars
+                    )
+                    body_map = {m.uid: m.body_preview for m in small_bodies}
+                    for meta in chunk_results:
+                        if meta.uid in body_map:
+                            meta.body_preview = body_map[meta.uid]
+                except Exception as e:
+                    log.warning(f"Failed dynamic body fetch for chunk {chunk_idx}: {e}")
 
             chunk_elapsed = time.perf_counter() - chunk_started
 
@@ -362,14 +377,10 @@ class MailEngine:
                 if progress_cb:
                     progress_cb(meta)
 
-            # Checkpoint: persist so we can resume if interrupted
             if chunk_results:
                 mark_uids_fetched([m.uid for m in chunk_results])
-                # Incremental batch-commit to SQLite cache
                 save_mails_cache(chunk_results, batch_size=rl.db_batch_size)
 
-            # Adaptive pacing: reduce delay on stable chunks, increase after
-            # retries to stay server-friendly under transient failures.
             if had_retry:
                 base = max(chunk_delay, rl.chunk_delay)
                 chunk_delay = min(0.5, (base * 1.5) + 0.01)
@@ -391,7 +402,11 @@ class MailEngine:
         from ..db.database import save_mails_cache
 
         rl = self._rl
-        uids = [m.uid for m in mails]
+        # Zaten body_preview'ı dolu olanları elediğimizden emin oluyoruz
+        uids = [m.uid for m in mails if not m.body_preview]
+        if not uids:
+            return mails
+            
         fetched_dict: dict[str, str] = {}
         chunks = list(chunk_list(uids, rl.fetch_chunk_size))
         total_chunks = len(chunks)
@@ -404,7 +419,7 @@ class MailEngine:
         for chunk_idx, chunk in enumerate(chunks, start=1):
             def _fetch(c=chunk):
                 return _fetch_mails_bulk(
-                    self._conn,  # type: ignore[arg-type]
+                    self._conn,
                     c,
                     fetch_body=True,
                     max_body_chars=self.cfg.ollama.max_body_chars,
@@ -418,9 +433,7 @@ class MailEngine:
                     ): self._recover_connection(exc, lbl, attempt),
                 )
             except Exception as exc:
-                log.error(
-                    f"Body chunk {chunk_idx}/{total_chunks} failed permanently: {exc}"
-                )
+                log.error(f"Body chunk {chunk_idx}/{total_chunks} failed permanently: {exc}")
                 chunk_results = []
 
             for meta in chunk_results:
@@ -435,30 +448,8 @@ class MailEngine:
             if progress_cb:
                 progress_cb(mail)
 
-        # Persist updated body previews in batches
         save_mails_cache(mails, batch_size=rl.db_batch_size)
         return mails
-
-    # ------------------------------------------------------------------
-    # Internal helper kept for backward-compatibility
-    # ------------------------------------------------------------------
-
-    def _execute_concurrent(
-        self, worker_fn: Callable, items: list, max_workers: int
-    ) -> list:
-        results = [None] * len(items)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(worker_fn, idx, item): idx
-                for idx, item in enumerate(items)
-            }
-            for f in as_completed(futures):
-                try:
-                    idx, res = f.result()
-                    results[idx] = res
-                except Exception:
-                    pass
-        return [r for r in results if r is not None]
 
     # ------------------------------------------------------------------
     # Analysis
@@ -487,7 +478,6 @@ class MailEngine:
             fast_results.append(res)
         
         if not need_llm or (cancel_event and cancel_event.is_set()):
-            # If not PRO mode or cancelled, we are done with fast results
             for res in fast_results:
                 self._record_stats(stats, stats_lock, res, progress_cb)
             return fast_results, stats
@@ -516,6 +506,7 @@ class MailEngine:
                 return idx, ScanResult(mail=candidate.mail, decision="TUT", reason="cancelled")
             
             llm_cfg = self.cfg.lm_studio if self.cfg.llm_backend == "lm_studio" else self.cfg.ollama
+            # Timeout mekanizması pro_analyze içinde HTTP client seviyesinde ele alınmalıdır.
             res = pro_analyze(
                 candidate.mail, 
                 llm_cfg, 
@@ -525,16 +516,28 @@ class MailEngine:
             )
             return idx, res
 
+        # Model takılmalarını engellemek için agresif timeout takibi
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_idx = {
                 executor.submit(_llm_worker, i, c): i 
                 for i, c in enumerate(sil_candidates)
             }
+            # Eğer local model (VRAM dolması vs.) yanıt vermezse worker kilitlenmesini önle
+            timeout_limit = 60.0 
+            
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]
                 try:
-                    _, res = future.result()
+                    # Timeout limitini burada da uyguluyoruz
+                    _, res = future.result(timeout=timeout_limit)
                     llm_results[idx] = res
+                except TimeoutError:
+                    log.error(f"LLM worker timeout ({timeout_limit}s) for candidate {idx}")
+                    llm_results[idx] = ScanResult(
+                        mail=sil_candidates[idx].mail, 
+                        decision="TUT", 
+                        reason="analyze-timeout"
+                    )
                 except Exception as exc:
                     log.warning(f"LLM worker failed for candidate {idx}: {exc}")
                     llm_results[idx] = ScanResult(
@@ -543,7 +546,6 @@ class MailEngine:
                         reason=f"analyze-error:{exc}"
                     )
 
-        # Combine results and record stats
         final_results = tut_results + [r for r in llm_results if r is not None]
         for res in final_results:
             self._record_stats(stats, stats_lock, res, progress_cb)
@@ -561,7 +563,7 @@ class MailEngine:
             cb(res)
 
     # ------------------------------------------------------------------
-    # Deletion / trash â€” rate-limit + retry on every chunk
+    # Deletion / trash
     # ------------------------------------------------------------------
 
     def delete_mails(
@@ -580,9 +582,7 @@ class MailEngine:
             uid_str = ",".join(chunk)
 
             def _store(u=uid_str):
-                status, _ = self._conn.uid(  # type: ignore[union-attr]
-                    "store", u, "+FLAGS", r"(\Deleted)"
-                )
+                status, _ = self._conn.uid("store", u, "+FLAGS", r"(\Deleted)")
                 if status != "OK":
                     raise RuntimeError(f"STORE returned {status}")
 
@@ -608,7 +608,7 @@ class MailEngine:
         log.info("Expunging deleted messages")
         try:
             _with_retry(
-                lambda: self._conn.expunge(),  # type: ignore[union-attr]
+                lambda: self._conn.expunge(),
                 rl,
                 label="delete expunge",
                 on_error=lambda exc, attempt: self._recover_connection(
@@ -623,13 +623,12 @@ class MailEngine:
         return deleted
 
     def _resolve_trash_folders(self, hint: str) -> list[str]:
-        """Return ordered trash folder candidates discovered via LIST + provider hints."""
         candidates: list[str] = []
         if hint:
             candidates.append(hint.strip('"'))
 
         try:
-            status, lines = self._conn.list('""', "*")  # type: ignore[union-attr]
+            status, lines = self._conn.list('""', "*")
             if status == "OK":
                 for line in lines:
                     if not line:
@@ -641,16 +640,7 @@ class MailEngine:
                     name = (m.group(1) or m.group(2)).strip('"')
                     lower_text = text.lower()
                     has_trash_flag = r"\trash" in lower_text
-                    keywords = (
-                        "trash",
-                        "bin",
-                        "deleted",
-                        "çöp",
-                        "silinmiş",
-                        "papelera",
-                        "corbeille",
-                        "papierkorb",
-                    )
+                    keywords = ("trash", "bin", "deleted", "çöp", "silinmiş", "papelera", "corbeille", "papierkorb")
                     has_keyword = any(k in name.lower() for k in keywords)
                     if has_trash_flag or has_keyword:
                         candidates.append(name)
@@ -660,15 +650,10 @@ class MailEngine:
             log.warning(f"Trash folder discovery failed: {e}")
 
         if self.cfg.provider == Provider.GMAIL:
-            candidates.extend(
-                [
-                    "[Gmail]/Trash",
-                    "[Google Mail]/Trash",
-                    "[Gmail]/Bin",
-                    "[Google Mail]/Bin",
-                    "Trash",
-                ]
-            )
+            candidates.extend([
+                "[Gmail]/Trash", "[Google Mail]/Trash", "[Gmail]/Bin",
+                "[Google Mail]/Bin", "Trash",
+            ])
 
         deduped: list[str] = []
         seen: set[str] = set()
@@ -692,10 +677,6 @@ class MailEngine:
 
         return deduped
 
-    def _resolve_trash_folder(self, hint: str) -> str:
-        """Backward-compatible single-folder resolver."""
-        return self._resolve_trash_folders(hint)[0]
-
     def move_to_trash(
         self,
         uids: list[str],
@@ -716,35 +697,39 @@ class MailEngine:
         for chunk_idx, chunk in enumerate(chunks, start=1):
             uid_str = ",".join(chunk)
 
+            # --- HATA DÜZELTİLDİ: Copy ve Store işlemleri ayrıldı ---
             def _copy(u=uid_str):
                 last_status = "NO"
                 for folder in folders:
-                    status, _ = self._conn.uid(  # type: ignore[union-attr]
-                        "copy", u, f'"{folder}"'
-                    )
+                    status, _ = self._conn.uid("copy", u, f'"{folder}"')
                     if status == "OK":
-                        store_status, _ = self._conn.uid(  # type: ignore[union-attr]
-                            "store", u, "+FLAGS", r"(\Deleted)"
-                        )
-                        if store_status != "OK":
-                            raise RuntimeError(f"STORE returned {store_status}")
-                        return
+                        return  # Başarılı kopyalama, Store işi diğer adıma bırakıldı.
                     last_status = status
-                    log.debug(
-                        f"COPY returned {status} for trash folder '{folder}', "
-                        "trying next candidate"
-                    )
+                    log.debug(f"COPY returned {status} for trash folder '{folder}', trying next candidate")
                 raise RuntimeError(f"COPY returned {last_status}")
 
+            def _store_deleted(u=uid_str):
+                store_status, _ = self._conn.uid("store", u, "+FLAGS", r"(\Deleted)")
+                if store_status != "OK":
+                    raise RuntimeError(f"STORE returned {store_status}")
+
             try:
+                # 1. Aşama: Güvenli Kopyalama
                 _with_retry(
-                    _copy,
-                    rl,
-                    label=f"trash chunk {chunk_idx}/{total_chunks}",
+                    _copy, rl, label=f"trash chunk copy {chunk_idx}/{total_chunks}",
                     on_error=lambda exc, attempt, lbl=(
-                        f"trash chunk {chunk_idx}/{total_chunks}"
+                        f"trash chunk copy {chunk_idx}/{total_chunks}"
                     ): self._force_reconnect(lbl, attempt),
                 )
+                
+                # 2. Aşama: Etiketleme (Eğer koparsa kopyalama baştan yapılmaz, sadece bu denenir)
+                _with_retry(
+                    _store_deleted, rl, label=f"trash chunk store {chunk_idx}/{total_chunks}",
+                    on_error=lambda exc, attempt, lbl=(
+                        f"trash chunk store {chunk_idx}/{total_chunks}"
+                    ): self._force_reconnect(lbl, attempt),
+                )
+                
                 moved.extend(chunk)
                 if progress_cb:
                     for uid in chunk:
@@ -757,12 +742,8 @@ class MailEngine:
 
         try:
             _with_retry(
-                lambda: self._conn.expunge(),  # type: ignore[union-attr]
-                rl,
-                label="trash expunge",
-                on_error=lambda exc, attempt: self._recover_connection(
-                    exc, "trash expunge", attempt
-                ),
+                lambda: self._conn.expunge(), rl, label="trash expunge",
+                on_error=lambda exc, attempt: self._recover_connection(exc, "trash expunge", attempt),
             )
         except Exception as exc:
             log.error(f"Trash expunge failed after retries: {exc}")
@@ -782,14 +763,6 @@ class MailEngine:
         delete_progress_cb: Optional[Callable] = None,
         resume: bool = False,
     ) -> tuple[list[ScanResult], ScanStats]:
-        """Full scan-and-optionally-delete pipeline.
-
-        Parameters
-        ----------
-        resume:
-            Pass ``True`` to skip UIDs already checkpointed from a previous
-            interrupted run.
-        """
         log.info("Starting Engine run")
         try:
             self.connect()

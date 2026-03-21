@@ -214,3 +214,47 @@ def test_ollama_prompt_includes_fast_category_hint():
         sent_payload = mock_session.post.call_args.kwargs["json"]
         user_content = sent_payload["messages"][1]["content"]
         assert "Kategori: promotion" in user_content
+
+
+def test_ollama_provider_falls_back_to_top_level_response_when_content_empty():
+    cfg = OllamaConfig(model="test_model", base_url="http://test")
+    provider = pro_analyzer.OllamaProvider(cfg)
+
+    meta = MailMeta(uid="1", subject="Buy now", sender="test@test.com", body_preview="Sale sale sale")
+
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "message": {"content": ""},
+            "response": "{\"decision\":\"SIL\",\"reason\":\"promosyon\"}",
+        }
+        mock_session.post.return_value = mock_resp
+
+        result = provider.analyze(meta)
+
+        assert result.decision == "SIL"
+        assert "llm:sil" in result.reason.lower()
+
+
+def test_ollama_provider_sends_think_flag_and_qwen_budget():
+    cfg = OllamaConfig(model="qwen3.5:2B", base_url="http://test", use_think=False)
+    provider = pro_analyzer.OllamaProvider(cfg)
+
+    meta = MailMeta(uid="1", subject="Buy now", sender="test@test.com", body_preview="Sale sale sale")
+
+    with patch("mailshift.core.analyzers.pro._get_session") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"message": {"content": "{\"decision\":\"TUT\"}"}}
+        mock_session.post.return_value = mock_resp
+
+        provider.analyze(meta)
+
+        sent_payload = mock_session.post.call_args.kwargs["json"]
+        assert sent_payload["think"] is False
+        assert sent_payload["options"]["num_predict"] == 256
