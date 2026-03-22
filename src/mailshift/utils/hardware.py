@@ -172,9 +172,9 @@ def _get_intel_mac_gpu_info(total_ram_gb: float, available_ram_gb: float) -> dic
 
 
 
-    matches = re.findall(r"(Chipset Model|Model):\s*(.+)", output)
+    matches = re.findall(r"(?:Chipset Model|Model):\s*(.+)", output)
 
-    for _, model in matches:
+    for model in matches:
 
         gpu_name = model.strip()
 

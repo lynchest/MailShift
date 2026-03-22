@@ -3,6 +3,12 @@ from unittest.mock import patch
 from mailshift.utils.hardware import calculate_optimal_workers, get_system_info
 
 
+class _VM:
+    def __init__(self, total: int, available: int):
+        self.total = total
+        self.available = available
+
+
 @patch("mailshift.utils.hardware.psutil.cpu_count", return_value=8)
 @patch("mailshift.utils.hardware.psutil.virtual_memory")
 @patch("mailshift.utils.hardware.platform.machine", return_value="AMD64")
@@ -15,7 +21,7 @@ def test_get_system_info_detects_intel_gpu(
     mock_virtual_memory,
     _mock_cpu_count,
 ):
-    vm = type("VM", (), {"total": 16 * 1024**3, "available": 8 * 1024**3})
+    vm = _VM(total=16 * 1024**3, available=8 * 1024**3)
     mock_virtual_memory.return_value = vm
 
     mock_check_output.side_effect = [
@@ -44,7 +50,7 @@ def test_get_system_info_intel_uses_shared_ram_when_vram_missing(
     mock_virtual_memory,
     _mock_cpu_count,
 ):
-    vm = type("VM", (), {"total": 32 * 1024**3, "available": 12 * 1024**3})
+    vm = _VM(total=32 * 1024**3, available=12 * 1024**3)
     mock_virtual_memory.return_value = vm
 
     mock_check_output.side_effect = [
@@ -95,7 +101,7 @@ def test_get_system_info_detects_amd_gpu(
     mock_virtual_memory,
     _mock_cpu_count,
 ):
-    vm = type("VM", (), {"total": 16 * 1024**3, "available": 8 * 1024**3})
+    vm = _VM(total=16 * 1024**3, available=8 * 1024**3)
     mock_virtual_memory.return_value = vm
 
     mock_check_output.side_effect = [
@@ -125,7 +131,7 @@ def test_get_system_info_amd_uses_shared_ram_when_vram_missing(
     mock_virtual_memory,
     _mock_cpu_count,
 ):
-    vm = type("VM", (), {"total": 24 * 1024**3, "available": 10 * 1024**3})
+    vm = _VM(total=24 * 1024**3, available=10 * 1024**3)
     mock_virtual_memory.return_value = vm
 
     mock_check_output.side_effect = [
@@ -177,7 +183,7 @@ def test_get_system_info_detects_intel_mac_gpu(
     mock_virtual_memory,
     _mock_cpu_count,
 ):
-    vm = type("VM", (), {"total": 16 * 1024**3, "available": 8 * 1024**3})
+    vm = _VM(total=16 * 1024**3, available=8 * 1024**3)
     mock_virtual_memory.return_value = vm
     mock_check_output.return_value = b"Chipset Model: Intel Iris Plus Graphics"
 
@@ -200,7 +206,7 @@ def test_get_system_info_detects_apple_silicon(
     mock_virtual_memory,
     _mock_cpu_count,
 ):
-    vm = type("VM", (), {"total": 16 * 1024**3, "available": 12 * 1024**3})
+    vm = _VM(total=16 * 1024**3, available=12 * 1024**3)
     mock_virtual_memory.return_value = vm
 
     info = get_system_info()
