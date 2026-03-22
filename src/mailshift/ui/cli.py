@@ -207,22 +207,32 @@ def open_lm_studio_download_page() -> bool:
     except Exception:
         return False
 
-def install_lm_studio_windows() -> bool:
-    if sys.platform != "win32":
-        console.print("[red]Otomatik LM Studio kurulumu şu an sadece Windows için destekleniyor.[/red]")
-        return False
-    if shutil.which("winget") is None:
-        console.print("[red]winget bulunamadı. Lütfen LM Studio'yu siteden indirip kurun: https://lmstudio.ai[/red]")
-        return False
-
-    console.print("\n[bold yellow]LM Studio winget ile kuruluyor...[/bold yellow]")
-    try:
-        process = subprocess.Popen([
+def install_lm_studio() -> bool:
+    if sys.platform == "win32":
+        if shutil.which("winget") is None:
+            console.print("[red]winget bulunamadı. Lütfen LM Studio'yu siteden indirip kurun: https://lmstudio.ai[/red]")
+            return False
+        command = [
             "winget", "install", "--id", "ElementLabs.LMStudio", "-e",
             "--accept-package-agreements", "--accept-source-agreements",
-        ], stdout=sys.stdout, stderr=sys.stderr)
+        ]
+        title = "LM Studio winget ile kuruluyor..."
+    elif sys.platform == "darwin":
+        if shutil.which("brew") is None:
+            console.print("[red]Homebrew bulunamadı. Lütfen LM Studio'yu siteden indirip kurun: https://lmstudio.ai[/red]")
+            return False
+        command = ["brew", "install", "--cask", "lm-studio"]
+        title = "LM Studio Homebrew ile kuruluyor..."
+    else:
+        console.print("[red]Otomatik LM Studio kurulumu bu sistemde desteklenmiyor.[/red]")
+        console.print("[yellow]Lütfen LM Studio'yu manuel kurun: https://lmstudio.ai[/yellow]")
+        return False
+
+    console.print(f"\n[bold yellow]{title}[/bold yellow]")
+    try:
+        process = subprocess.Popen(command, stdout=sys.stdout, stderr=sys.stderr)
         process.wait()
-        
+
         if process.returncode == 0:
             console.print("\n[bold green]✔ LM Studio başarıyla kuruldu.[/bold green]")
             return True
@@ -408,12 +418,23 @@ def show_ollama_next_steps(reason: str = "") -> None:
     console.print(Panel(f"{extra}[bold cyan]Adımlar:[/bold cyan]\n{steps}", title="Bilgi", border_style="yellow", box=box.ROUNDED))
 
 def install_ollama() -> bool:
-    if sys.platform != "win32":
-        console.print("[red]Otomatik kurulum sadece Windows için.[/red]")
+    if sys.platform == "win32":
+        command = ["powershell", "-Command", "irm https://ollama.com/install.ps1 | iex"]
+        title = "Ollama indiriliyor..."
+    elif sys.platform == "darwin":
+        if shutil.which("brew") is None:
+            console.print("[red]Homebrew bulunamadı. Lütfen Ollama'yı siteden indirip kurun: https://ollama.com[/red]")
+            return False
+        command = ["brew", "install", "ollama"]
+        title = "Ollama Homebrew ile kuruluyor..."
+    else:
+        console.print("[red]Otomatik Ollama kurulumu bu sistemde desteklenmiyor.[/red]")
+        console.print("[yellow]Lütfen Ollama'yı manuel kurun: https://ollama.com[/yellow]")
         return False
-    console.print("\n[bold yellow]Ollama indiriliyor...[/bold yellow]")
+
+    console.print(f"\n[bold yellow]{title}[/bold yellow]")
     try:
-        process = subprocess.Popen(["powershell", "-Command", "irm https://ollama.com/install.ps1 | iex"], stdout=sys.stdout, stderr=sys.stderr)
+        process = subprocess.Popen(command, stdout=sys.stdout, stderr=sys.stderr)
         process.wait()
         if process.returncode == 0:
             console.print("\n[bold green]✔ Kurulum komutu çalıştırıldı![/bold green]")
@@ -553,7 +574,7 @@ def _prompt_lm_studio_flow() -> tuple[Mode, str, str, Optional[int]]:
         install_choice = Prompt.ask("[bold]Kurulum seçeneği[/bold]", choices=["1", "2", "3"], default="1")
 
         if install_choice == "1":
-            install_lm_studio_windows()
+            install_lm_studio()
         elif install_choice == "2":
             if open_lm_studio_download_page():
                 console.print("[green]Tarayıcıda LM Studio indirme sayfası açıldı.[/green]")
@@ -637,28 +658,23 @@ def prompt_mode() -> tuple[Mode, str, str, Optional[int]]:
                     "Lütfen [bold white]ollama.com[/bold white] adresinden indirin ve kurun.",
                     title="Hata", border_style="red"
                 ))
-                if sys.platform == "win32":
-                    if Confirm.ask("\n[bold yellow]Ollama şimdi otomatik kurulsun mu?[/bold yellow]", default=True):
-                        if install_ollama():
-                            console.print("\n[bold green]Ollama kuruldu. Şimdi otomatik başlatmayı deniyorum...[/bold green]")
-                            time.sleep(2)
-                            if start_ollama():
-                                available_models = get_ollama_models()
-                                if not available_models:
-                                    show_ollama_next_steps("Ollama çalışıyor ancak henüz model bulunamadı.")
-                                    return Mode.FAST, "qwen3.5:2B", llm_backend
-                            else:
-                                show_ollama_next_steps("Ollama kuruldu ancak otomatik başlatılamadı.")
+                if Confirm.ask("\n[bold yellow]Ollama şimdi otomatik kurulsun mu?[/bold yellow]", default=True):
+                    if install_ollama():
+                        console.print("\n[bold green]Ollama kuruldu. Şimdi otomatik başlatmayı deniyorum...[/bold green]")
+                        time.sleep(2)
+                        if start_ollama():
+                            available_models = get_ollama_models()
+                            if not available_models:
+                                show_ollama_next_steps("Ollama çalışıyor ancak henüz model bulunamadı.")
                                 return Mode.FAST, "qwen3.5:2B", llm_backend
                         else:
-                            show_ollama_next_steps("Kurulum tamamlanamadı. Manuel kurulum gerekebilir.")
+                            show_ollama_next_steps("Ollama kuruldu ancak otomatik başlatılamadı.")
                             return Mode.FAST, "qwen3.5:2B", llm_backend
                     else:
-                        show_ollama_next_steps("Otomatik kurulum atlandı.")
-                        console.print("[cyan]Fast moduna geçiliyor...[/cyan]")
+                        show_ollama_next_steps("Kurulum tamamlanamadı. Manuel kurulum gerekebilir.")
                         return Mode.FAST, "qwen3.5:2B", llm_backend
                 else:
-                    show_ollama_next_steps("Bu sistemde otomatik kurulum yok. Manuel kurulum gerekli.")
+                    show_ollama_next_steps("Otomatik kurulum atlandı.")
                     console.print("[cyan]Fast moduna geçiliyor...[/cyan]")
                     return Mode.FAST, "qwen3.5:2B", llm_backend
 

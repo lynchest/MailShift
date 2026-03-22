@@ -78,9 +78,15 @@ def get_system_info() -> SystemInfo:
 
     
 
-    if platform.system() == "Darwin" and platform.machine() == "arm64":
+    if platform.system() == "Darwin":
 
-        gpu_info = _get_apple_silicon_info(total_ram, available_ram)
+        if platform.machine() == "arm64":
+
+            gpu_info = _get_apple_silicon_info(total_ram, available_ram)
+
+        else:
+
+            gpu_info = _get_intel_mac_gpu_info(total_ram, available_ram)
 
     else:
 
@@ -140,6 +146,67 @@ def _get_apple_silicon_info(total_ram: float, available_ram: float) -> dict:
 
     }
 
+
+
+
+
+def _get_intel_mac_gpu_info(total_ram_gb: float, available_ram_gb: float) -> dict:
+
+    result = {"has_gpu": False, "name": "None", "total_vram_gb": 0.0, "available_vram_gb": 0.0, "driver": "None"}
+
+    try:
+
+        output = subprocess.check_output(
+
+            ["system_profiler", "SPDisplaysDataType"],
+
+            stderr=subprocess.DEVNULL,
+
+            timeout=5,
+
+        ).decode("utf-8", errors="replace")
+
+    except Exception:
+
+        return result
+
+
+
+    matches = re.findall(r"(?:Chipset Model|Model):\s*(.+)", output)
+
+    for model in matches:
+
+        gpu_name = model.strip()
+
+        lowered = gpu_name.lower()
+
+        if "intel" not in lowered and "amd" not in lowered and "radeon" not in lowered:
+
+            continue
+
+
+
+        total_vram, available_vram = _intel_shared_vram_estimate(total_ram_gb, available_ram_gb)
+
+        result.update({
+
+            "has_gpu": True,
+
+            "name": gpu_name,
+
+            "total_vram_gb": total_vram,
+
+            "available_vram_gb": available_vram,
+
+            "driver": "Metal API",
+
+        })
+
+        return result
+
+
+
+    return result
 
 
 
@@ -585,4 +652,3 @@ def format_system_info(system_info: SystemInfo, mode: str, model_name: Optional[
         return f"[bold]GPU:[/bold] None | [bold]RAM:[/bold] {system_info.available_ram_gb:.1f}GB"
 
     return f"[bold]CPU:[/bold] {system_info.cpu_count} cores | [bold]RAM:[/bold] {system_info.available_ram_gb:.1f}GB"
-
