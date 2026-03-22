@@ -163,6 +163,51 @@ def test_calculate_optimal_workers_uses_gpu_branch_for_amd(mock_get_system_info)
     workers = calculate_optimal_workers("qwen3.5:2B", mode="pro")
 
     assert workers >= 2
+
+
+@patch("mailshift.utils.hardware.psutil.cpu_count", return_value=8)
+@patch("mailshift.utils.hardware.psutil.virtual_memory")
+@patch("mailshift.utils.hardware.platform.machine", return_value="x86_64")
+@patch("mailshift.utils.hardware.platform.system", return_value="Darwin")
+@patch("mailshift.utils.hardware.subprocess.check_output")
+def test_get_system_info_detects_intel_mac_gpu(
+    mock_check_output,
+    _mock_system,
+    _mock_machine,
+    mock_virtual_memory,
+    _mock_cpu_count,
+):
+    vm = type("VM", (), {"total": 16 * 1024**3, "available": 8 * 1024**3})
+    mock_virtual_memory.return_value = vm
+    mock_check_output.return_value = b"Chipset Model: Intel Iris Plus Graphics"
+
+    info = get_system_info()
+
+    assert info.has_gpu is True
+    assert "Intel" in info.gpu_name
+    assert info.gpu_driver == "Metal API"
+    assert info.vram_total_gb > 0
+    assert info.vram_available_gb > 0
+
+
+@patch("mailshift.utils.hardware.psutil.cpu_count", return_value=8)
+@patch("mailshift.utils.hardware.psutil.virtual_memory")
+@patch("mailshift.utils.hardware.platform.machine", return_value="arm64")
+@patch("mailshift.utils.hardware.platform.system", return_value="Darwin")
+def test_get_system_info_detects_apple_silicon(
+    _mock_system,
+    _mock_machine,
+    mock_virtual_memory,
+    _mock_cpu_count,
+):
+    vm = type("VM", (), {"total": 16 * 1024**3, "available": 12 * 1024**3})
+    mock_virtual_memory.return_value = vm
+
+    info = get_system_info()
+
+    assert info.has_gpu is True
+    assert info.gpu_name == "Apple Silicon (Metal)"
+    assert info.gpu_driver == "Metal API"
 @patch("mailshift.utils.hardware.get_system_info")
 def test_calculate_optimal_workers_manual_override(mock_get_system_info):
     info = type(
