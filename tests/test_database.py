@@ -71,3 +71,54 @@ def test_checkpoint_operations(mock_db_file):
     # Wait, clear_checkpoint only empties the table, the file still exists
     # but the set should be empty.
     assert database.get_fetched_uids() == set()
+
+
+def test_get_db_connection_pragmas(mock_db_file):
+    with database.get_db_connection() as conn:
+        journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+        synchronous = conn.execute("PRAGMA synchronous;").fetchone()[0]
+        temp_store = conn.execute("PRAGMA temp_store;").fetchone()[0]
+
+        # PRAGMA journal_mode returns 'wal'
+        assert journal_mode == "wal"
+        # PRAGMA synchronous NORMAL is 1
+        assert synchronous == 1
+        # PRAGMA temp_store MEMORY is 2
+        assert temp_store == 2
+
+
+def test_get_db_connection_commit(mock_db_file):
+    database.init_db()  # Create tables
+    with database.get_db_connection() as conn:
+        conn.execute("INSERT INTO fetch_checkpoint (uid) VALUES ('test_uid')")
+
+    # Verify commit happened automatically
+    with database.get_db_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM fetch_checkpoint WHERE uid='test_uid'").fetchone()[0]
+        assert count == 1
+
+
+def test_get_db_connection_rollback(mock_db_file):
+    database.init_db()  # Create tables
+    class DummyException(Exception):
+        pass
+
+    with pytest.raises(DummyException):
+        with database.get_db_connection() as conn:
+            conn.execute("INSERT INTO fetch_checkpoint (uid) VALUES ('rollback_uid')")
+            raise DummyException("Force rollback")
+
+    # Verify rollback happened automatically
+    with database.get_db_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM fetch_checkpoint WHERE uid='rollback_uid'").fetchone()[0]
+        assert count == 0
+
+
+def test_get_db_connection_closes(mock_db_file):
+    with database.get_db_connection() as conn:
+        pass  # Just enter and exit
+
+    # The connection should be closed outside the context
+    import sqlite3
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")
