@@ -58,32 +58,95 @@ def test_app_config_initialization():
     assert isinstance(app_cfg.rate_limit, RateLimitConfig)
 
 
-@patch("mailshift.config.config._load_keywords")
-@patch("mailshift.config.config._save_keywords")
+@patch("mailshift.config.config.KeywordManager._load_json")
+@patch("mailshift.config.config.KeywordManager._save_json")
 def test_keywords_management(_save_mock, _load_mock):
-    # Test whitelist scenarios
-    _load_mock.return_value = ["important"]
+    from mailshift.config.config import keyword_manager
+
+    def side_effect(filename, default):
+        if filename == "whitelist.json":
+            return ["important"]
+        if filename == "blacklist.json":
+            return {"uncategorized": ["spam"]}
+        return default
+
+    _load_mock.side_effect = side_effect
+    keyword_manager.reload()
 
     # adding new word
     assert add_to_whitelist("urgent") is True
-    _save_mock.assert_called_with("whitelist.json", ["important", "urgent"])
+    _save_mock.assert_any_call("whitelist.json", ["important", "urgent"])
 
     # adding existing word
-    _load_mock.return_value = ["important", "urgent"]
+    def side_effect_whitelist_has_urgent(filename, default):
+        if filename == "whitelist.json":
+            return ["important", "urgent"]
+        if filename == "blacklist.json":
+            return {"uncategorized": ["spam"]}
+        return default
+    _load_mock.side_effect = side_effect_whitelist_has_urgent
+    keyword_manager.reload()
     assert add_to_whitelist("urgent") is False
 
     # removing existing word
     assert remove_from_whitelist("important") is True
-    _save_mock.assert_called_with("whitelist.json", ["urgent"])
+    _save_mock.assert_any_call("whitelist.json", ["urgent"])
 
     # removing non-existent word
     assert remove_from_whitelist("missing") is False
 
     # Test blacklist scenarios
-    _load_mock.return_value = ["spam"]
+    _load_mock.side_effect = side_effect
+    keyword_manager.reload()
     assert add_to_blacklist("offer") is True
-    _save_mock.assert_called_with("blacklist.json", ["spam", "offer"])
+    _save_mock.assert_any_call("blacklist.json", {"uncategorized": ["spam"], "promotion": ["offer"]})
 
-    _load_mock.return_value = ["spam", "offer"]
+    def side_effect_blacklist_has_offer(filename, default):
+        if filename == "whitelist.json":
+            return ["important"]
+        if filename == "blacklist.json":
+            return {"uncategorized": ["spam"], "promotion": ["offer"]}
+        return default
+    _load_mock.side_effect = side_effect_blacklist_has_offer
+    keyword_manager.reload()
+
     assert remove_from_blacklist("spam") is True
-    _save_mock.assert_called_with("blacklist.json", ["offer"])
+    _save_mock.assert_any_call("blacklist.json", {"uncategorized": [], "promotion": ["offer"]})
+
+
+@pytest.mark.parametrize(
+    "keyword, expected_category",
+    [
+        # newsletter tests
+        ("newsletter", "newsletter"),
+        ("Bülten", "newsletter"),
+        ("daily digest", "newsletter"),
+        ("Mailchimp", "newsletter"),
+        ("substack list", "newsletter"),
+
+        # subscription tests
+        ("unsubscribe", "subscription"),
+        ("List-Unsubscribe", "subscription"),
+        ("Abonelik", "subscription"),
+        ("Listeden çık", "subscription"),
+        ("preferences", "subscription"),
+        ("opt out", "subscription"),
+
+        # promotion tests
+        ("Discount", "promotion"),
+        ("Kampanya", "promotion"),
+        ("Black Friday Sale", "promotion"),
+        ("Sepet", "promotion"),
+        ("özel fırsat", "promotion"),
+        ("free shipping", "promotion"),
+
+        # uncategorized / fallback tests
+        ("fatura", "uncategorized"),
+        ("random string", "uncategorized"),
+        ("", "uncategorized"),
+    ],
+)
+def test_infer_category(keyword, expected_category):
+    from mailshift.config.config import KeywordManager
+    km = KeywordManager()
+    assert km._infer_category(keyword) == expected_category
