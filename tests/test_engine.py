@@ -19,7 +19,7 @@ from mailshift.config.config import (
     Provider,
     build_imap_config,
 )
-from mailshift.core.engine import MailEngine, _extract_body_preview, chunk_list
+from mailshift.core.engine import MailEngine, _extract_body_preview, _has_attachment, chunk_list
 from mailshift.models.models import MailMeta, ScanResult, ScanStats
 
 
@@ -469,6 +469,44 @@ def test_extract_body_preview_empty_on_no_content():
     msg = Message()
     result = _extract_body_preview(msg)
     assert result == ""
+
+
+
+# ---------------------------------------------------------------------------
+# _has_attachment helpers
+# ---------------------------------------------------------------------------
+
+def test_has_attachment_single_part_no_attachment():
+    msg = _make_email_msg("Hello world", "text/plain")
+    assert _has_attachment(msg) is False
+
+def test_has_attachment_single_part_with_attachment():
+    msg = _make_email_msg("Attachment content", "application/pdf")
+    msg.add_header("Content-Disposition", "attachment; filename=\"doc.pdf\"")
+    assert _has_attachment(msg) is True
+
+def test_has_attachment_multipart_no_attachment():
+    msg = _make_multipart_msg(plain="Plain text", html="<html><body>HTML</body></html>")
+    assert _has_attachment(msg) is False
+
+def test_has_attachment_multipart_with_attachment():
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.application import MIMEApplication
+
+    msg = MIMEMultipart("mixed")
+    msg.attach(MIMEText("Body text", "plain"))
+
+    pdf_part = MIMEApplication(b"fake pdf content", "pdf")
+    pdf_part.add_header("Content-Disposition", "attachment; filename=\"file.pdf\"")
+    msg.attach(pdf_part)
+
+    assert _has_attachment(msg) is True
+
+def test_has_attachment_case_insensitive():
+    msg = _make_email_msg("Attachment content", "application/pdf")
+    msg.add_header("Content-Disposition", "AtTaChMeNt; filename=\"doc.pdf\"")
+    assert _has_attachment(msg) is True
 
 
 
