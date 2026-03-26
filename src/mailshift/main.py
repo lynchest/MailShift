@@ -28,10 +28,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Windows Terminal Fix
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
     import os
-    os.environ["TERM"] = "xterm-256color"
+    if getattr(sys.stdout, "encoding", "").lower() != "utf-8":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if getattr(sys.stderr, "encoding", "").lower() != "utf-8":
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    if "TERM" not in os.environ:
+        os.environ["TERM"] = "xterm-256color"
 
 import click
 from rich import box
