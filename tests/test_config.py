@@ -14,6 +14,7 @@ from mailshift.config.config import (
     remove_from_whitelist,
     add_to_blacklist,
     remove_from_blacklist,
+    KeywordManager,
 )
 
 
@@ -58,32 +59,86 @@ def test_app_config_initialization():
     assert isinstance(app_cfg.rate_limit, RateLimitConfig)
 
 
-@patch("mailshift.config.config._load_keywords")
-@patch("mailshift.config.config._save_keywords")
+@patch("mailshift.config.config.KeywordManager._load_json")
+@patch("mailshift.config.config.KeywordManager._save_json")
 def test_keywords_management(_save_mock, _load_mock):
-    # Test whitelist scenarios
-    _load_mock.return_value = ["important"]
+    from mailshift.config.config import keyword_manager
+
+    def side_effect(filename, default):
+        if filename == "whitelist.json":
+            return _load_mock.whitelist_return
+        elif filename == "blacklist.json":
+            return _load_mock.blacklist_return
+        return default
+
+    _load_mock.side_effect = side_effect
+    _load_mock.whitelist_return = ["important"]
+    _load_mock.blacklist_return = {"uncategorized": []}
+
+    # Reset internal state to avoid bleeding test state
+    keyword_manager.whitelist = ["important"]
+    keyword_manager.blacklist_dict = {"uncategorized": []}
 
     # adding new word
-    assert add_to_whitelist("urgent") is True
-    _save_mock.assert_called_with("whitelist.json", ["important", "urgent"])
+    assert keyword_manager.add_whitelist("urgent") is True
+    _save_mock.assert_any_call("whitelist.json", ["important", "urgent"])
 
     # adding existing word
-    _load_mock.return_value = ["important", "urgent"]
-    assert add_to_whitelist("urgent") is False
+    _load_mock.whitelist_return = ["important", "urgent"]
+    keyword_manager.whitelist = ["important", "urgent"]
+    assert keyword_manager.add_whitelist("urgent") is False
 
     # removing existing word
-    assert remove_from_whitelist("important") is True
-    _save_mock.assert_called_with("whitelist.json", ["urgent"])
+    assert keyword_manager.remove_whitelist("important") is True
+    _save_mock.assert_any_call("whitelist.json", ["urgent"])
 
     # removing non-existent word
-    assert remove_from_whitelist("missing") is False
+    assert keyword_manager.remove_whitelist("missing") is False
 
     # Test blacklist scenarios
-    _load_mock.return_value = ["spam"]
-    assert add_to_blacklist("offer") is True
-    _save_mock.assert_called_with("blacklist.json", ["spam", "offer"])
+    keyword_manager.blacklist_dict = {"uncategorized": ["spam"]}
+    keyword_manager.blacklist_category_map = {"spam": "uncategorized"}
+    _load_mock.blacklist_return = {"uncategorized": ["spam"]}
+    assert keyword_manager.add_blacklist("offer") is True
+    _save_mock.assert_any_call("blacklist.json", {"uncategorized": ["spam"], "promotion": ["offer"]})
 
-    _load_mock.return_value = ["spam", "offer"]
-    assert remove_from_blacklist("spam") is True
-    _save_mock.assert_called_with("blacklist.json", ["offer"])
+    keyword_manager.blacklist_dict = {"uncategorized": ["spam"], "promotion": ["offer"]}
+    keyword_manager.blacklist_category_map = {"spam": "uncategorized", "offer": "promotion"}
+    _load_mock.blacklist_return = {"uncategorized": ["spam"], "promotion": ["offer"]}
+    assert keyword_manager.remove_blacklist("spam") is True
+    _save_mock.assert_any_call("blacklist.json", {"uncategorized": [], "promotion": ["offer"]})
+
+
+@patch("mailshift.config.config.get_path")
+def test_load_json_success(mock_get_path, tmp_path):
+    test_file = tmp_path / "test.json"
+    test_file.write_text('{"key": "value"}', encoding="utf-8")
+    mock_get_path.return_value = test_file
+
+    km = KeywordManager()
+    result = km._load_json("test.json", default={"default": True})
+
+    assert result == {"key": "value"}
+
+
+@patch("mailshift.config.config.get_path")
+def test_load_json_not_exists(mock_get_path, tmp_path):
+    test_file = tmp_path / "nonexistent.json"
+    mock_get_path.return_value = test_file
+
+    km = KeywordManager()
+    result = km._load_json("nonexistent.json", default={"default": True})
+
+    assert result == {"default": True}
+
+
+@patch("mailshift.config.config.get_path")
+def test_load_json_invalid_json(mock_get_path, tmp_path):
+    test_file = tmp_path / "invalid.json"
+    test_file.write_text('{"key": "value", }', encoding="utf-8") # Invalid JSON
+    mock_get_path.return_value = test_file
+
+    km = KeywordManager()
+    result = km._load_json("invalid.json", default={"default": True})
+
+    assert result == {"default": True}
