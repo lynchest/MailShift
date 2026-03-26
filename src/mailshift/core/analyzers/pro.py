@@ -172,7 +172,8 @@ def check_lm_studio_health(base_url: str = "http://localhost:1234", model: str =
             return True, f"LM Studio çalışıyor, {len(available)} model yüklü."
         return False, "LM Studio çalışıyor fakat yüklü model yok."
 
-    if any(model.lower() in m.lower() or m.lower() in model.lower() for m in available):
+    model_lower = model.lower()
+    if any(model_lower in (m_lower := m.lower()) or m_lower in model_lower for m in available):
         return True, f"LM Studio çalışıyor, model '{model}' mevcut."
 
     return False, f"LM Studio çalışıyor fakat '{model}' modeli yüklü değil."
