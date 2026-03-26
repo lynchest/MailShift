@@ -31,6 +31,9 @@ IMAPConnection: TypeAlias = imaplib.IMAP4 | imaplib.IMAP4_SSL
 # (Double fetch maliyetini düşürmek için eklendi)
 SMALL_MAIL_THRESHOLD_BYTES = 25 * 1024 
 
+_UID_RE = re.compile(r"UID\s+(\d+)", re.IGNORECASE)
+_SIZE_RE = re.compile(r"RFC822\.SIZE\s+(\d+)", re.IGNORECASE)
+
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -168,10 +171,10 @@ def _fetch_mails_bulk(
             continue
         try:
             msg_info = item[0].decode(errors="replace")
-            uid_match = re.search(r"UID\s+(\d+)", msg_info, re.IGNORECASE)
+            uid_match = _UID_RE.search(msg_info)
             parsed_uid = uid_match.group(1) if uid_match else None
 
-            size_match = re.search(r"RFC822\.SIZE\s+(\d+)", msg_info, re.IGNORECASE)
+            size_match = _SIZE_RE.search(msg_info)
             size_bytes = int(size_match.group(1)) if size_match else 0
 
             msg = email.message_from_bytes(item[1])
