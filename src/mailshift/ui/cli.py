@@ -296,11 +296,12 @@ def _extract_lm_studio_status_payload(payload: object, model_name: str) -> dict:
     if isinstance(payload, dict):
         downloads = payload.get("downloads")
         if isinstance(downloads, list) and downloads:
+            target_model = model_name.lower()
             for item in downloads:
                 if not isinstance(item, dict):
                     continue
                 item_model = str(item.get("model") or item.get("model_id") or item.get("id") or "")
-                if item_model.lower() == model_name.lower():
+                if item_model.lower() == target_model:
                     return item
             first = downloads[0]
             if isinstance(first, dict):
@@ -392,13 +393,14 @@ def download_lm_studio_model(model_name: str, base_url: str = LM_STUDIO_BASE_URL
 
 def ensure_lm_studio_model(model_name: str, available_models: list[str] | None = None, base_url: str = LM_STUDIO_BASE_URL, max_attempts: int = 2) -> bool:
     current = available_models if available_models is not None else get_lm_studio_models(base_url=base_url)
-    if any(model_name.lower() == m.lower() for m in current):
+    target_model = model_name.lower()
+    if any(target_model == m.lower() for m in current):
         return True
     for attempt in range(1, max_attempts + 1):
         console.print(f"[cyan]{model_name} LM Studio listesinde yok. İndiriliyor ({attempt}/{max_attempts}).[/cyan]")
         if download_lm_studio_model(model_name, base_url=base_url):
             refreshed = get_lm_studio_models(base_url=base_url, timeout=8)
-            if any(model_name.lower() == m.lower() for m in refreshed):
+            if any(target_model == m.lower() for m in refreshed):
                 return True
     return False
 
@@ -528,12 +530,13 @@ def download_ollama_model(model_name: str, base_url: str = OLLAMA_BASE_URL) -> b
 
 def ensure_ollama_model(model_name: str, available_models: list[str] | None = None, base_url: str = OLLAMA_BASE_URL, max_attempts: int = 2) -> bool:
     current = available_models if available_models is not None else get_ollama_models(base_url=base_url)
-    if any(model_name.lower() == m.lower() for m in current):
+    target_model = model_name.lower()
+    if any(target_model == m.lower() for m in current):
         return True
     for attempt in range(1, max_attempts + 1):
         if download_ollama_model(model_name, base_url=base_url):
             refreshed = get_ollama_models(base_url=base_url, timeout=8)
-            if any(model_name.lower() == m.lower() for m in refreshed):
+            if any(target_model == m.lower() for m in refreshed):
                 return True
     return False
 
@@ -711,14 +714,19 @@ def prompt_mode() -> tuple[Mode, str, str, Optional[int]]:
             "Slower": "[bold red]Slower[/bold red]",
         }
 
+        available_models_lower = [m.lower() for m in available_models]
+        available_models_set = set(available_models_lower)
+        recommended_names = [name for name, _, _ in recommended_models]
+        recommended_names_lower = [name.lower() for name in recommended_names]
+        recommended_names_set = set(recommended_names_lower)
+
         for idx, (rec_model, badge, speed) in enumerate(recommended_models, start=1):
-            is_available = any(rec_model.lower() == m.lower() for m in available_models)
+            is_available = rec_model.lower() in available_models_set
             status = "[bold green]Mevcut[/bold green]" if is_available else "[bold red]Mevcut Değil[/bold red]"
             colored_speed = SPEED_COLOR.get(speed, speed)
             mt.add_row(f"[{idx}]", rec_model, status + f" ({badge}) " + colored_speed)
         
-        recommended_names = [name for name, _, _ in recommended_models]
-        non_rec_models = [m for m in available_models if not any(m.lower() == r.lower() for r in recommended_names)]
+        non_rec_models = [m for m in available_models if m.lower() not in recommended_names_set]
         
         for idx, md in enumerate(non_rec_models, start=len(recommended_models) + 1):
             mt.add_row(f"[{idx}]", md, "")
@@ -734,7 +742,7 @@ def prompt_mode() -> tuple[Mode, str, str, Optional[int]]:
             idx = int(model_choice) - len(recommended_models) - 1
             model = non_rec_models[idx]
         
-        if model in recommended_names and not any(model.lower() == m.lower() for m in available_models):
+        if model.lower() in recommended_names_set and model.lower() not in available_models_set:
             if not ensure_ollama_model(model, available_models=available_models):
                 console.print("[yellow]Model hazır olmadığı için Fast moduna geçiliyor.[/yellow]")
                 return Mode.FAST, "qwen3.5:2B", llm_backend
