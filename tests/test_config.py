@@ -10,10 +10,7 @@ from mailshift.config.config import (
     RateLimitConfig,
     AppConfig,
     build_imap_config,
-    add_to_whitelist,
-    remove_from_whitelist,
-    add_to_blacklist,
-    remove_from_blacklist,
+    KeywordManager,
 )
 
 
@@ -58,32 +55,73 @@ def test_app_config_initialization():
     assert isinstance(app_cfg.rate_limit, RateLimitConfig)
 
 
-@patch("mailshift.config.config._load_keywords")
-@patch("mailshift.config.config._save_keywords")
-def test_keywords_management(_save_mock, _load_mock):
-    # Test whitelist scenarios
-    _load_mock.return_value = ["important"]
+@patch.object(KeywordManager, "_load_json")
+@patch.object(KeywordManager, "_save_json")
+def test_keyword_manager_whitelist(_save_mock, _load_mock):
+    # Setup load mock for initialization
+    def mock_load(filename, default):
+        if filename == "whitelist.json":
+            return ["important"]
+        elif filename == "blacklist.json":
+            return {"uncategorized": []}
+        return default
+    _load_mock.side_effect = mock_load
+
+    manager = KeywordManager()
 
     # adding new word
-    assert add_to_whitelist("urgent") is True
-    _save_mock.assert_called_with("whitelist.json", ["important", "urgent"])
+    assert manager.add_whitelist("urgent") is True
+    _save_mock.assert_any_call("whitelist.json", ["important", "urgent"])
 
     # adding existing word
-    _load_mock.return_value = ["important", "urgent"]
-    assert add_to_whitelist("urgent") is False
+    manager.whitelist = ["important", "urgent"]
+    assert manager.add_whitelist("urgent") is False
 
     # removing existing word
-    assert remove_from_whitelist("important") is True
-    _save_mock.assert_called_with("whitelist.json", ["urgent"])
+    manager.whitelist = ["important", "urgent"]
+    assert manager.remove_whitelist("important") is True
+    _save_mock.assert_any_call("whitelist.json", ["urgent"])
 
     # removing non-existent word
-    assert remove_from_whitelist("missing") is False
+    manager.whitelist = ["urgent"]
+    assert manager.remove_whitelist("missing") is False
 
-    # Test blacklist scenarios
-    _load_mock.return_value = ["spam"]
-    assert add_to_blacklist("offer") is True
-    _save_mock.assert_called_with("blacklist.json", ["spam", "offer"])
 
-    _load_mock.return_value = ["spam", "offer"]
-    assert remove_from_blacklist("spam") is True
-    _save_mock.assert_called_with("blacklist.json", ["offer"])
+@patch.object(KeywordManager, "_load_json")
+@patch.object(KeywordManager, "_save_json")
+def test_keyword_manager_blacklist(_save_mock, _load_mock):
+    # Setup load mock for initialization
+    def mock_load(filename, default):
+        if filename == "whitelist.json":
+            return []
+        elif filename == "blacklist.json":
+            return {"uncategorized": ["spam"]}
+        return default
+    _load_mock.side_effect = mock_load
+
+    manager = KeywordManager()
+
+    # adding new word to blacklist
+    assert manager.add_blacklist("offer") is True
+    # "offer" infer_category -> "promotion"
+    _save_mock.assert_any_call("blacklist.json", {"uncategorized": ["spam"], "promotion": ["offer"]})
+
+    # update mock_load so reload() gets the updated blacklist_dict
+    def mock_load_updated(filename, default):
+        if filename == "whitelist.json":
+            return []
+        elif filename == "blacklist.json":
+            return {"uncategorized": ["spam"], "promotion": ["offer"]}
+        return default
+    _load_mock.side_effect = mock_load_updated
+
+    # adding existing word
+    manager.reload()
+    assert manager.add_blacklist("offer") is False
+
+    # removing existing word
+    assert manager.remove_blacklist("spam") is True
+    _save_mock.assert_any_call("blacklist.json", {"uncategorized": [], "promotion": ["offer"]})
+
+    # removing non-existent word
+    assert manager.remove_blacklist("missing") is False
