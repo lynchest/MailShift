@@ -641,7 +641,8 @@ class MailEngine:
                     lower_text = text.lower()
                     has_trash_flag = r"\trash" in lower_text
                     keywords = ("trash", "bin", "deleted", "çöp", "silinmiş", "papelera", "corbeille", "papierkorb")
-                    has_keyword = any(k in name.lower() for k in keywords)
+                    lower_name = name.lower()
+                    has_keyword = any(k in lower_name for k in keywords)
                     if has_trash_flag or has_keyword:
                         candidates.append(name)
             else:
