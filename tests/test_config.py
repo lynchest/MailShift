@@ -10,10 +10,7 @@ from mailshift.config.config import (
     RateLimitConfig,
     AppConfig,
     build_imap_config,
-    add_to_whitelist,
-    remove_from_whitelist,
-    add_to_blacklist,
-    remove_from_blacklist,
+    KeywordManager,
 )
 
 
@@ -58,32 +55,97 @@ def test_app_config_initialization():
     assert isinstance(app_cfg.rate_limit, RateLimitConfig)
 
 
-@patch("mailshift.config.config._load_keywords")
-@patch("mailshift.config.config._save_keywords")
-def test_keywords_management(_save_mock, _load_mock):
-    # Test whitelist scenarios
-    _load_mock.return_value = ["important"]
+@pytest.fixture
+def empty_keyword_manager():
+    """Returns a fresh KeywordManager without disk I/O."""
+    with patch.object(KeywordManager, "_load_json", return_value=[]), \
+         patch.object(KeywordManager, "_save_json"):
+        km = KeywordManager()
+        km.whitelist = []
+        km.blacklist_dict = {}
+        km.junk_keywords_flat = []
+        km.blacklist_category_map = {}
+        yield km
 
-    # adding new word
-    assert add_to_whitelist("urgent") is True
-    _save_mock.assert_called_with("whitelist.json", ["important", "urgent"])
 
-    # adding existing word
-    _load_mock.return_value = ["important", "urgent"]
-    assert add_to_whitelist("urgent") is False
+def test_keyword_manager_add_blacklist(empty_keyword_manager):
+    km = empty_keyword_manager
 
-    # removing existing word
-    assert remove_from_whitelist("important") is True
-    _save_mock.assert_called_with("whitelist.json", ["urgent"])
+    with patch.object(km, "_save_json") as mock_save, \
+         patch.object(km, "reload") as mock_reload:
 
-    # removing non-existent word
-    assert remove_from_whitelist("missing") is False
+        # Test 1: Adding a new word successfully
+        assert km.add_blacklist("Discount") is True
 
-    # Test blacklist scenarios
-    _load_mock.return_value = ["spam"]
-    assert add_to_blacklist("offer") is True
-    _save_mock.assert_called_with("blacklist.json", ["spam", "offer"])
+        # Target category is inferred (discount -> promotion)
+        expected_dict = {"promotion": ["Discount"]}
+        mock_save.assert_called_with("blacklist.json", expected_dict)
+        mock_reload.assert_called_once()
 
-    _load_mock.return_value = ["spam", "offer"]
-    assert remove_from_blacklist("spam") is True
-    _save_mock.assert_called_with("blacklist.json", ["offer"])
+        # Manually trigger what reload would do to setup state for the next test
+        km.blacklist_dict = expected_dict
+        km.blacklist_category_map = {"discount": "promotion"}
+        km.junk_keywords_flat = ["discount"]
+
+        mock_save.reset_mock()
+        mock_reload.reset_mock()
+
+        # Test 2: Adding an existing word (case insensitive)
+        assert km.add_blacklist("discount") is False
+        assert km.add_blacklist("DISCOUNT") is False
+        mock_save.assert_not_called()
+        mock_reload.assert_not_called()
+
+        # Test 3: Adding a word to a different category
+        assert km.add_blacklist("Newsletter") is True
+        expected_dict = {"promotion": ["Discount"], "newsletter": ["Newsletter"]}
+        mock_save.assert_called_with("blacklist.json", expected_dict)
+        mock_reload.assert_called_once()
+
+        # Test 4: Default fallback category (uncategorized)
+        assert km.add_blacklist("randomword") is True
+        expected_dict = {
+            "promotion": ["Discount"],
+            "newsletter": ["Newsletter"],
+            "uncategorized": ["randomword"]
+        }
+        mock_save.assert_called_with("blacklist.json", expected_dict)
+
+
+def test_keyword_manager_whitelist(empty_keyword_manager):
+    km = empty_keyword_manager
+
+    with patch.object(km, "_save_json") as mock_save, \
+         patch.object(km, "reload") as mock_reload:
+
+        # Adding new word
+        assert km.add_whitelist("urgent") is True
+        mock_save.assert_called_with("whitelist.json", ["urgent"])
+        mock_reload.assert_called_once()
+
+        # Manually update state
+        km.whitelist = ["urgent"]
+        mock_save.reset_mock()
+        mock_reload.reset_mock()
+
+        # Adding existing word
+        assert km.add_whitelist("urgent") is False
+        mock_save.assert_not_called()
+        mock_reload.assert_not_called()
+
+        # Removing existing word
+        assert km.remove_whitelist("urgent") is True
+        mock_save.assert_called_with("whitelist.json", [])
+        mock_reload.assert_called_once()
+
+        # Manually update state
+        km.whitelist = []
+        mock_save.reset_mock()
+        mock_reload.reset_mock()
+
+        # Removing non-existent word
+        assert km.remove_whitelist("missing") is False
+        mock_save.assert_not_called()
+        mock_reload.assert_not_called()
+
+
