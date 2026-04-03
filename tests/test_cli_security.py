@@ -33,6 +33,7 @@ def test_install_ollama_subprocess_no_shell():
     """
     # Mock sys.platform to be win32 to enter the installation block
     with patch("mailshift.ui.cli.sys.platform", "win32"), \
+         patch("mailshift.ui.cli.shutil.which", return_value="/path/to/winget"), \
          patch("mailshift.ui.cli.subprocess.Popen") as mock_popen, \
          patch("mailshift.ui.cli.console") as mock_console, \
          patch("mailshift.ui.cli.show_ollama_next_steps") as mock_show_steps:
@@ -55,5 +56,8 @@ def test_install_ollama_subprocess_no_shell():
         assert kwargs.get("shell") is not True, "subprocess.Popen called with shell=True"
 
         # Verify the command list
-        expected_cmd = ["powershell", "-Command", "irm https://ollama.com/install.ps1 | iex"]
+        expected_cmd = [
+            "winget", "install", "--id", "Ollama.Ollama", "-e",
+            "--accept-package-agreements", "--accept-source-agreements",
+        ]
         assert args[0] == expected_cmd

@@ -421,8 +421,14 @@ def show_ollama_next_steps(reason: str = "") -> None:
 
 def install_ollama() -> bool:
     if sys.platform == "win32":
-        command = ["powershell", "-Command", "irm https://ollama.com/install.ps1 | iex"]
-        title = "Ollama indiriliyor..."
+        if shutil.which("winget") is None:
+            console.print("[red]winget bulunamadı. Lütfen Ollama'yı siteden indirip kurun: https://ollama.com[/red]")
+            return False
+        command = [
+            "winget", "install", "--id", "Ollama.Ollama", "-e",
+            "--accept-package-agreements", "--accept-source-agreements",
+        ]
+        title = "Ollama winget ile kuruluyor..."
     elif sys.platform == "darwin":
         if shutil.which("brew") is None:
             console.print("[red]Homebrew bulunamadı. Lütfen Ollama'yı siteden indirip kurun: https://ollama.com[/red]")

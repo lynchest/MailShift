@@ -1,55 +1,86 @@
 import sys
-import os
-import re
+from unittest.mock import patch, MagicMock
 
-def test_extract_reason():
-    # Define REASON_PATTERNS locally to test the logic without dependencies
-    REASON_PATTERNS = [
-        re.compile(r'çünkü\s+(.+?)(?:\.|$)', re.IGNORECASE),
-        re.compile(r'nedeni[:\s]\s*(.+?)(?:\.|$)', re.IGNORECASE),
-        re.compile(r'sebebi[:\s]\s*(.+?)(?:\.|$)', re.IGNORECASE),
-        re.compile(r'because\s+(.+?)(?:\.|$)', re.IGNORECASE),
-        re.compile(r'since\s+(.+?)(?:\.|$)', re.IGNORECASE),
-        re.compile(r'reason:\s*(.+?)(?:\.|$)', re.IGNORECASE),
-        re.compile(r'it is\s+(a\s+\w+)\s+', re.IGNORECASE),
-        re.compile(r'this is\s+(a\s+\w+)\s+', re.IGNORECASE),
-    ]
+# Create a robust mocking environment to bypass dependency-related import errors
+class MockPackage(MagicMock):
+    @classmethod
+    def __getattr__(cls, name):
+        return MagicMock()
 
-    def _extract_reason(response: str, decision: str) -> str:
-        response_lower = response.lower()
-        for pattern in REASON_PATTERNS:
-            match = pattern.search(response_lower)
-            if match:
-                reason = match.group(1).strip()
-                if 3 < len(reason) < 150:
-                    return reason
-        if decision == "SIL":
-            return "newsletter/spam"
-        return "personal/important"
+# Pre-mock all external and potentially problematic dependencies
+modules_to_mock = [
+    "rich", "rich.panel", "rich.progress", "rich.prompt", "rich.table", "rich.box",
+    "requests", "requests.adapters", "requests.exceptions",
+    "psutil", "bs4", "keyring", "keyring.errors",
+    "mailshift.core.analyzers.pro", "mailshift.config.config", "mailshift.ui.styles", "mailshift.utils.paths"
+]
 
-    test_cases = [
-        ("Bu bir bülten çünkü abone oldunuz.", "SIL", "abone oldunuz"),
-        ("Nedeni: gereksiz kampanya mesajı.", "SIL", "gereksiz kampanya mesajı"),
-        ("Sebebi: test.", "SIL", "test"),
-        ("Because it is a test.", "SIL", "it is a test"),
-        ("Since you joined us.", "SIL", "you joined us"),
-        ("Reason: simple test.", "SIL", "simple test"),
-        ("it is a promotion ", "SIL", "a promotion"),
-        ("this is a newsletter ", "SIL", "a newsletter"),
-        ("No clear reason.", "SIL", "newsletter/spam"),
-        ("No clear reason.", "TUT", "personal/important"),
-    ]
+for mod in modules_to_mock:
+    sys.modules[mod] = MockPackage()
 
-    for response, decision, expected_reason in test_cases:
-        actual_reason = _extract_reason(response, decision)
-        print(f"Input: {response[:30]}... | Decision: {decision}")
-        print(f"Expected: {expected_reason} | Actual: {actual_reason}")
-        assert actual_reason == expected_reason, f"Failed for {response}: expected {expected_reason}, got {actual_reason}"
+# Also mock 'shutil' and 'subprocess' in the cli module if needed, but we'll use patch for those.
+
+# Now we can import the function we want to test.
+# Since we are mocking mailshift.*, we need to ensure the import from src.mailshift.ui.cli works.
+# Let's mock the internal imports inside cli.py by patching them before they are executed if possible,
+# or just rely on the fact that we've already populated sys.modules.
+
+try:
+    # We might need to add 'src' to sys.path if it's not there, but PYTHONPATH should handle it.
+    from mailshift.ui.cli import install_ollama
+except ImportError as e:
+    print(f"Import failed: {e}")
+    # Fallback: try direct import if the above fails
+    sys.path.append("src")
+    from mailshift.ui.cli import install_ollama
+
+def test_install_ollama_winget_fix():
+    print("Testing install_ollama winget fix on Windows...")
+
+    with patch("mailshift.ui.cli.sys.platform", "win32"), \
+         patch("mailshift.ui.cli.shutil.which", return_value="/path/to/winget"), \
+         patch("mailshift.ui.cli.subprocess.Popen") as mock_popen, \
+         patch("mailshift.ui.cli.console") as mock_console:
+
+        mock_process = MagicMock()
+        mock_process.wait.return_value = None
+        mock_process.returncode = 0
+        mock_popen.return_value = mock_process
+
+        result = install_ollama()
+
+        assert result is True
+        mock_popen.assert_called_once()
+        args, _ = mock_popen.call_args
+        expected_cmd = [
+            "winget", "install", "--id", "Ollama.Ollama", "-e",
+            "--accept-package-agreements", "--accept-source-agreements",
+        ]
+        assert args[0] == expected_cmd
+        print("✓ Verified winget command used.")
+
+def test_install_ollama_no_winget_fallback():
+    print("Testing install_ollama fallback when winget is missing...")
+
+    with patch("mailshift.ui.cli.sys.platform", "win32"), \
+         patch("mailshift.ui.cli.shutil.which", return_value=None), \
+         patch("mailshift.ui.cli.console") as mock_console:
+
+        result = install_ollama()
+
+        assert result is False
+        printed_messages = [str(call.args[0]) for call in mock_console.print.call_args_list]
+        assert any("https://ollama.com" in msg for msg in printed_messages)
+        assert any("winget bulunamadı" in msg for msg in printed_messages)
+        print("✓ Verified fallback message.")
 
 if __name__ == "__main__":
     try:
-        test_extract_reason()
-        print("\nAll functional tests passed!")
+        test_install_ollama_winget_fix()
+        test_install_ollama_no_winget_fallback()
+        print("\nAll tests passed!")
     except Exception as e:
         print(f"\nTest failed: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
