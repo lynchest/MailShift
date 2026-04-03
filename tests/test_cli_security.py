@@ -61,3 +61,57 @@ def test_install_ollama_subprocess_no_shell():
             "--accept-package-agreements", "--accept-source-agreements",
         ]
         assert args[0] == expected_cmd
+
+
+def test_install_ollama_windows_fallback_asks_and_runs_powershell():
+    with patch("mailshift.ui.cli.sys.platform", "win32"), \
+         patch("mailshift.ui.cli.shutil.which", return_value=None), \
+         patch("mailshift.ui.cli.Confirm.ask", return_value=True) as mock_confirm, \
+         patch("mailshift.ui.cli.subprocess.Popen") as mock_popen, \
+         patch("mailshift.ui.cli.console"):
+
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_popen.return_value = mock_process
+
+        result = install_ollama()
+
+        assert result is True
+        mock_popen.assert_called_once()
+        args, kwargs = mock_popen.call_args
+        assert kwargs.get("shell") is not True
+        mock_confirm.assert_called_once_with(
+            "[bold yellow]PowerShell betiği ile otomatik kurulum denensin mi?[/bold yellow]",
+            default=False,
+        )
+        assert args[0] == [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "Invoke-Expression (Invoke-RestMethod 'https://ollama.com/install.ps1')",
+        ]
+
+
+def test_install_ollama_windows_fallback_decline_returns_false():
+    with patch("mailshift.ui.cli.sys.platform", "win32"), \
+         patch("mailshift.ui.cli.shutil.which", return_value=None), \
+         patch("mailshift.ui.cli.Confirm.ask", return_value=False) as mock_confirm, \
+         patch("mailshift.ui.cli.subprocess.Popen") as mock_popen, \
+         patch("mailshift.ui.cli.console") as mock_console:
+
+        result = install_ollama()
+
+        assert result is False
+        mock_popen.assert_not_called()
+        mock_confirm.assert_called_once_with(
+            "[bold yellow]PowerShell betiği ile otomatik kurulum denensin mi?[/bold yellow]",
+            default=False,
+        )
+        printed_messages = [str(call.args[0]) for call in mock_console.print.call_args_list]
+        assert any("winget bulunamadı" in msg for msg in printed_messages)
+        assert any("internetten indirilen bir PowerShell betiği çalıştırır" in msg for msg in printed_messages)
+        assert any("Otomatik kurulum iptal edildi" in msg for msg in printed_messages)
+        manual_install_url = "https://ollama.com"
+        assert any(manual_install_url in msg for msg in printed_messages)
