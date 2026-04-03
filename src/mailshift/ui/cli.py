@@ -423,6 +423,7 @@ def install_ollama() -> bool:
     if sys.platform == "win32":
         if shutil.which("winget") is None:
             console.print("[yellow]winget bulunamadı.[/yellow]")
+            console.print("[yellow]Uyarı: Bu seçenek internetten indirilen bir PowerShell betiğini çalıştırır.[/yellow]")
             if not Confirm.ask("[bold yellow]PowerShell betiği ile otomatik kurulum denensin mi?[/bold yellow]", default=False):
                 console.print("[red]Otomatik kurulum iptal edildi. Lütfen Ollama'yı siteden indirip kurun: https://ollama.com[/red]")
                 return False

@@ -103,4 +103,4 @@ def test_install_ollama_windows_fallback_decline_returns_false():
         mock_popen.assert_not_called()
         printed_messages = [str(call.args[0]) for call in mock_console.print.call_args_list]
         assert any("winget bulunamadı" in msg for msg in printed_messages)
-        assert any("ollama.com" in msg for msg in printed_messages)
+        assert any("Otomatik kurulum iptal edildi" in msg for msg in printed_messages)
