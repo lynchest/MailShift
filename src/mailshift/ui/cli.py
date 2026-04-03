@@ -41,6 +41,7 @@ from ..config.config import (
 )
 from .styles import console, clear_console
 from ..utils.paths import get_path, ROOT_DIR
+from ..utils.logger import log
 
 
 # --- Sabitler ---
@@ -89,8 +90,8 @@ def preload_model_in_background(model_name: str, backend: str) -> None:
                     json={"model": model_name, "keep_alive": "30m"},
                     timeout=120
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.error(f"Warmup error (ollama): {e}")
         elif backend == "lm_studio":
             try:
                 requests.post(
@@ -102,8 +103,8 @@ def preload_model_in_background(model_name: str, backend: str) -> None:
                     },
                     timeout=120
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.error(f"Warmup error (lm_studio): {e}")
 
     console.print(f"\n[dim]⚡ {model_name} arkaplanda belleğe yükleniyor...[/dim]")
     thread = threading.Thread(target=_warmup, daemon=True)
