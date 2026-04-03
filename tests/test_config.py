@@ -149,3 +149,27 @@ def test_keyword_manager_whitelist(empty_keyword_manager):
         mock_reload.assert_not_called()
 
 
+def test_keyword_manager_get_category_for_match(empty_keyword_manager):
+    km = empty_keyword_manager
+
+    # Setup state
+    km.blacklist_category_map = {
+        "discount": "promotion",
+        "newsletter": "newsletter",
+        "unsubscribe": "subscription",
+    }
+
+    # Scenario 1: Exact match
+    assert km.get_category_for_match("discount") == "promotion"
+
+    # Scenario 2: Case-insensitivity and stripping
+    assert km.get_category_for_match("  Discount  ") == "promotion"
+    assert km.get_category_for_match("DISCOUNT") == "promotion"
+
+    # Scenario 3: Null/Empty input
+    assert km.get_category_for_match(None) == "uncategorized"
+    assert km.get_category_for_match("") == "uncategorized"
+    assert km.get_category_for_match("   ") == "uncategorized"
+
+    # Scenario 4: Unknown token
+    assert km.get_category_for_match("random") == "uncategorized"
