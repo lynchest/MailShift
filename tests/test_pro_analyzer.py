@@ -96,6 +96,39 @@ def test_parse_llm_response_handles_json_decision():
     assert isinstance(reason, str)
 
 
+def test_parse_llm_response_handles_alt_json_key_and_diacritics():
+    cfg = OllamaConfig(model="test_model", base_url="http://test")
+    provider = pro_analyzer.OllamaProvider(cfg)
+
+    decision, reason = provider._parse_llm_response('{"karar":"SİL"}')
+
+    assert decision == "SIL"
+    assert isinstance(reason, str)
+
+
+def test_parse_llm_response_invalid_text_falls_back_to_keep():
+    cfg = OllamaConfig(model="test_model", base_url="http://test")
+    provider = pro_analyzer.OllamaProvider(cfg)
+
+    decision, reason = provider._parse_llm_response("this is not a valid decision payload")
+
+    assert decision == "TUT"
+    assert reason == "invalid-response"
+
+
+def test_get_session_configures_retry_for_post_requests():
+    pro_analyzer.close_ollama_session()
+    session = pro_analyzer._get_session()
+
+    retries = session.adapters["http://"].max_retries
+    allowed = {m.upper() for m in (retries.allowed_methods or set())}
+
+    assert retries.total == 2
+    assert {"GET", "POST"}.issubset(allowed)
+
+    pro_analyzer.close_ollama_session()
+
+
 def test_select_ollama_runtime_options_cpu_only(monkeypatch):
     cpu_only = SystemInfo(
         cpu_count=16,

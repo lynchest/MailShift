@@ -222,7 +222,7 @@ class OllamaConfig(BaseModel):
 class LMStudioConfig(BaseModel):
     """Settings for the LM Studio OpenAI-compatible endpoint."""
     base_url: str = "http://localhost:1234"
-    model: str = ""
+    model: str = "gemma-4-26b-a4b"
     timeout: int = 60
     max_body_chars: int = 250
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
@@ -255,6 +255,8 @@ class AppConfig(BaseModel):
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     dry_run: bool = True
     scan_limit: Optional[int] = None
+    since: Optional[str] = None
+    before: Optional[str] = None
     max_workers: Optional[int] = None
 
 
@@ -274,5 +276,4 @@ def build_imap_config(
         defaults["port"] = port
     if use_ssl is not None:
         defaults["use_ssl"] = use_ssl
-        
     return IMAPConfig(username=username, password=password, **defaults)

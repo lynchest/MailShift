@@ -214,6 +214,8 @@ def test_get_system_info_detects_apple_silicon(
     assert info.has_gpu is True
     assert info.gpu_name == "Apple Silicon (Metal)"
     assert info.gpu_driver == "Metal API"
+
+
 @patch("mailshift.utils.hardware.get_system_info")
 def test_calculate_optimal_workers_manual_override(mock_get_system_info):
     info = type(
@@ -237,11 +239,7 @@ def test_calculate_optimal_workers_manual_override(mock_get_system_info):
     assert workers == 4
 
     # Test manual override exceeding VRAM limits (should be capped)
-    # 10.0GB available, 2B model needs ~0.3GB per worker -> max 31 workers (but capped by my safety logic)
-    # Wait, 2B model overhead is 0.15? Let's check get_vram_requirement.
-    # <= 3b -> 0.15. 10.0 / 0.15 = 66 workers. 
-    # Let's set vram very low.
     info.vram_available_gb = 0.7 # safe_vram = 0.2
-    # 0.2 / 0.15 = 1 worker
+    # 2B model requirement ~0.15. 0.2 / 0.15 = 1.3 -> 1 worker
     workers = calculate_optimal_workers("qwen3.5:2B", mode="pro", manual_workers=10)
     assert workers == 1

@@ -281,10 +281,19 @@ class MailEngine:
     # UID listing
     # ------------------------------------------------------------------
 
+    def _build_search_criteria(self) -> list[str]:
+        criteria = ["ALL"]
+        if self.cfg.since:
+            criteria.extend(["SINCE", self.cfg.since])
+        if self.cfg.before:
+            criteria.extend(["BEFORE", self.cfg.before])
+        return criteria
+
     def list_uids(self) -> list[str]:
         assert self._conn, "Not connected"
-        log.info("Searching for ALL messages in INBOX")
-        status, data = self._conn.uid("search", None, "ALL")
+        search_criteria = self._build_search_criteria()
+        log.info(f"Searching messages in INBOX with criteria: {' '.join(search_criteria)}")
+        status, data = self._conn.uid("search", None, *search_criteria)
         if status != "OK" or not data or not data[0]:
             log.warning("No messages found or search failed")
             return []

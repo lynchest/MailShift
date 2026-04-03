@@ -1,4 +1,4 @@
-﻿import sqlite3
+import sqlite3
 from pathlib import Path
 from typing import Optional, Iterator, List, Set, Dict
 from contextlib import contextmanager
@@ -15,7 +15,8 @@ def get_db_connection() -> Iterator[sqlite3.Connection]:
     # Timeout 15.0 saniye yapıldı: Çoklu thread okuma/yazmalarında "database is locked" engellenir
     conn = sqlite3.connect(DB_FILE, timeout=15.0)
     try:
-        # Performans: Connection-scoped pragmas
+        # Performans: WAL (Write-Ahead Logging) ve Memory tabanlı geçici depolama
+        conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA temp_store=MEMORY;")
         
@@ -31,8 +32,6 @@ def init_db() -> None:
         return
 
     with get_db_connection() as conn:
-        # Journal mode WAL must be set once for the database file
-        conn.execute("PRAGMA journal_mode=WAL;")
         conn.executescript('''
             CREATE TABLE IF NOT EXISTS mails_cache (
                 uid TEXT PRIMARY KEY,

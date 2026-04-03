@@ -20,10 +20,12 @@ from __future__ import annotations
 import sys
 import io
 import re
+import socket
 import time
 import threading
 import unicodedata
-from typing import Optional, Tuple, List
+from datetime import date
+from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Windows Terminal Fix
@@ -65,15 +67,15 @@ from .utils.hardware import (
     get_system_info,
 )
 from .core.engine import MailEngine, MailMeta, ScanResult, ScanStats
+from .core.session import AnalyzeProgressHandler, FetchProgressHandler, LLMWorker
 from .db.database import save_mails_cache, load_mails_cache_by_uids
 from .core.analyzers.pro import (
     check_ollama_health,
     check_lm_studio_health,
     close_ollama_session,
     unload_lm_studio_models,
-    pro_analyze,
 )
-from .core.analyzers.fast import fast_analyze, extract_fast_category
+from .core.analyzers.fast import fast_analyze
 from .ui.styles import (
     console,
     build_results_table,
@@ -117,6 +119,103 @@ def format_duration(seconds: float) -> str:
     return f"~{minutes} dk {sec:02d} sn" if minutes else f"~{sec} sn"
 
 
+_IMAP_MONTH_TO_NUM = {
+    "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+    "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+}
+_IMAP_NUM_TO_MONTH = {v: k for k, v in _IMAP_MONTH_TO_NUM.items()}
+
+
+def parse_cli_date(raw_value: Optional[str], option_name: str) -> Optional[date]:
+    """Parse CLI date text into a date object (supports YYYY-MM-DD and IMAP DD-Mon-YYYY)."""
+    if raw_value is None:
+        return None
+
+    candidate = raw_value.strip()
+    if not candidate:
+        return None
+
+    try:
+        return date.fromisoformat(candidate)
+    except ValueError:
+        pass
+
+    imap_match = re.fullmatch(r"(\d{1,2})-([A-Za-z]{3})-(\d{4})", candidate)
+    if imap_match:
+        day_s, mon_s, year_s = imap_match.groups()
+        month = _IMAP_MONTH_TO_NUM.get(mon_s.capitalize())
+        if month is None:
+            raise click.BadParameter(
+                f"{option_name} ay formatı geçersiz: '{raw_value}'. Örnek: 01-Jan-2025"
+            )
+        try:
+            return date(int(year_s), month, int(day_s))
+        except ValueError as exc:
+            raise click.BadParameter(f"{option_name} geçersiz: '{raw_value}'") from exc
+
+    for sep in ("/", "."):
+        parts = candidate.split(sep)
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            day_i, month_i, year_i = (int(parts[0]), int(parts[1]), int(parts[2]))
+            try:
+                return date(year_i, month_i, day_i)
+            except ValueError as exc:
+                raise click.BadParameter(f"{option_name} geçersiz: '{raw_value}'") from exc
+
+    raise click.BadParameter(
+        f"{option_name} formatı geçersiz: '{raw_value}'. Örnek: 2025-01-01 veya 01-Jan-2025"
+    )
+
+
+def format_imap_date(value: Optional[date]) -> Optional[str]:
+    """Convert a date object to locale-independent IMAP date format (DD-Mon-YYYY)."""
+    if value is None:
+        return None
+    month = _IMAP_NUM_TO_MONTH[value.month]
+    return f"{value.day:02d}-{month}-{value.year:04d}"
+
+
+def _can_open_tcp(host: str, port: int, timeout: float = 1.5) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def ensure_proton_bridge_ready(cfg: AppConfig, max_checks: int = 5) -> bool:
+    """Probe Proton Bridge TCP endpoint and guide the user before IMAP login."""
+    if cfg.provider != Provider.PROTON:
+        return True
+
+    host, port = cfg.imap.host, cfg.imap.port
+    if _can_open_tcp(host, port):
+        return True
+
+    console.print(
+        Panel(
+            "[bold yellow]Proton Bridge çalışmıyor görünüyor.[/bold yellow]\n"
+            f"MailShift şu adrese bağlanamıyor: [cyan]{host}:{port}[/cyan]\n"
+            "[dim]Bridge'i başlatın ve hazır olunca Enter'a basın.[/dim]",
+            title="[bold yellow]Proton Bridge Bekleniyor[/bold yellow]",
+            border_style="yellow",
+            box=box.ROUNDED,
+        )
+    )
+
+    for attempt in range(1, max_checks + 1):
+        answer = Prompt.ask("[bold]Tekrar denemek için Enter, çıkmak için q[/bold]", default="").strip().lower()
+        if answer in {"q", "quit", "exit"}:
+            return False
+        if _can_open_tcp(host, port):
+            console.print("[green]✔ Proton Bridge bağlantısı algılandı.[/green]")
+            return True
+        if attempt < max_checks:
+            console.print(f"[yellow]Bridge hâlâ erişilemiyor ({attempt}/{max_checks}).[/yellow]")
+
+    return False
+
+
 def verify_llm_health(cfg: AppConfig, selected_model: str) -> bool:
     """Checks LLM backend health and prompts fallback if offline. Returns True if backend is healthy/kept."""
     is_lm_studio = cfg.llm_backend == "lm_studio"
@@ -152,6 +251,8 @@ def verify_llm_health(cfg: AppConfig, selected_model: str) -> bool:
 @click.option("--use-ssl/--no-ssl", default=True, help="Use SSL for IMAP connection.")
 @click.option("--dry-run/--no-dry-run", default=True, show_default=True, help="Dry run (default: enabled).")
 @click.option("--scan-limit", default=None, type=int, help="Max number of messages to scan.")
+@click.option("--since", default=None, help="Scan only messages on/after date (YYYY-MM-DD or DD-Mon-YYYY).")
+@click.option("--before", default=None, help="Scan only messages before date (YYYY-MM-DD or DD-Mon-YYYY).")
 @click.option("--ollama-url", default="http://localhost:11434", show_default=True, help="Ollama API base URL.")
 @click.option("--ollama-model", default="qwen3.5:2B", show_default=True, help="Ollama model name.")
 @click.option("--ollama-prompt", default=None, help="Custom system prompt for Ollama.")
@@ -168,6 +269,7 @@ def main(
     provider: Optional[str], mode: Optional[str], username: Optional[str],
     password: Optional[str], host: Optional[str], port: Optional[int],
     use_ssl: bool, dry_run: bool, scan_limit: Optional[int],
+    since: Optional[str], before: Optional[str],
     ollama_url: str, ollama_model: str, ollama_prompt: Optional[str],
     uninstall: bool, history: bool, add_whitelist: Optional[str],
     remove_whitelist: Optional[str], add_blacklist: Optional[str],
@@ -204,6 +306,14 @@ def main(
     imap_cfg = build_imap_config(
         resolved_provider, username, password, host=custom_host, port=custom_port, use_ssl=custom_use_ssl,
     )
+
+    since_date = parse_cli_date(since, "--since")
+    before_date = parse_cli_date(before, "--before")
+    if since_date and before_date and before_date <= since_date:
+        raise click.BadParameter("--before tarihi, --since tarihinden sonra olmalıdır.")
+
+    since_imap = format_imap_date(since_date)
+    before_imap = format_imap_date(before_date)
     
     sys_prompt = ollama_prompt or DEFAULT_SYSTEM_PROMPT
     ollama_cfg = OllamaConfig(base_url=ollama_url, model=selected_model, system_prompt=sys_prompt)
@@ -214,7 +324,8 @@ def main(
     cfg = AppConfig(
         provider=resolved_provider, mode=resolved_mode, imap=imap_cfg,
         ollama=ollama_cfg, lm_studio=lm_studio_cfg, llm_backend=llm_backend,
-        dry_run=dry_run, scan_limit=scan_limit, max_workers=manual_workers,
+        dry_run=dry_run, scan_limit=scan_limit, since=since_imap,
+        before=before_imap, max_workers=manual_workers,
     )
 
     clear_console()
@@ -223,6 +334,12 @@ def main(
     sys_info = get_system_info()
     model_display = f"Pro ({( 'LM Studio' if llm_backend == 'lm_studio' else 'Ollama' )}: {selected_model})" if resolved_mode == Mode.PRO else "Fast (heuristic)"
     hardware_info = format_system_info(sys_info, resolved_mode.value, selected_model)
+    date_filter_lines: List[str] = []
+    if since_imap:
+        date_filter_lines.append(f"[bold]Since:[/bold]    {since_imap}")
+    if before_imap:
+        date_filter_lines.append(f"[bold]Before:[/bold]   {before_imap}")
+    date_filter_block = ("\n" + "\n".join(date_filter_lines)) if date_filter_lines else ""
     
     console.print(
         Panel(
@@ -231,7 +348,8 @@ def main(
             f"[bold]User:[/bold]     {username}\n"
             f"[bold]Workers:[/bold]  {resolved_workers} {'[yellow](manual)[/yellow]' if manual_workers else '[dim](auto)[/dim]'}\n"
             f"{hardware_info}\n"
-            f"[bold]Dry run:[/bold]  {'[yellow]Yes | no emails will be deleted[/yellow]' if dry_run else '[red]No | emails WILL be deleted[/red]'}",
+            f"[bold]Dry run:[/bold]  {'[yellow]Yes | no emails will be deleted[/yellow]' if dry_run else '[red]No | emails WILL be deleted[/red]'}"
+            f"{date_filter_block}",
             title="[bold blue]Configuration[/bold blue]", border_style="blue", box=box.ROUNDED,
         )
     )
@@ -246,6 +364,10 @@ def main(
     scan_results: List[ScanResult] = []
 
     try:
+        if not ensure_proton_bridge_ready(cfg):
+            console.print("[bold red]Proton Bridge bağlantısı kurulamadı. İşlem iptal edildi.[/bold red]")
+            sys.exit(1)
+
         # ---- Connect & Fetch UIDs ----
         with console.status("[cyan]Connecting to IMAP server…[/cyan]", spinner="dots"):
             try:
@@ -284,27 +406,15 @@ def main(
                 TimeElapsedColumn(), console=console, transient=True
             ) as progress:
                 task = progress.add_task("fetch", total=len(missing_uids), current="Starting…")
-                fetch_start = time.perf_counter()
-                state = {"done": 0, "pending": 0} # Using dict for state avoids 'nonlocal' complexity
-                
-                def _on_fetch(meta: MailMeta) -> None:
-                    mails.append(meta)
-                    state["done"] += 1
-                    state["pending"] += 1
-                    
-                    sender = clean_text(meta.sender, max_len=20)
-                    if state["done"] >= 3:
-                        elapsed = max(0.001, time.perf_counter() - fetch_start)
-                        remaining = max(0.0, (len(missing_uids) - state["done"]) * (elapsed / state["done"]))
-                        current_label = f"{sender} | kalan {format_duration(remaining)}"
-                    else:
-                        current_label = f"{sender} | kalan hesaplanıyor"
-
-                    if state["pending"] >= 10 or state["done"] == len(missing_uids):
-                        progress.update(task, advance=state["pending"], current=current_label)
-                        state["pending"] = 0
-
-                engine.fetch_headers_concurrent(missing_uids, progress_cb=_on_fetch)
+                fetch_handler = FetchProgressHandler(
+                    mails=mails,
+                    progress=progress,
+                    task_id=task,
+                    total_count=len(missing_uids),
+                    clean_text_fn=clean_text,
+                    format_duration_fn=format_duration,
+                )
+                engine.fetch_headers_concurrent(missing_uids, progress_cb=fetch_handler)
             console.print("[green]Yeni başlıklar eklendi.[/green]")
 
         save_mails_cache(mails)
@@ -350,21 +460,10 @@ def main(
                 ) as progress:
                     task = progress.add_task("llm", total=len(sil_candidates), current="Starting…")
                     phase2_start = time.perf_counter()
-                    
-                    def _llm_worker(idx_result: Tuple[int, ScanResult]):
-                        idx, candidate = idx_result
-                        if cancel_event.is_set():
-                            return idx, ScanResult(mail=candidate.mail, decision="TUT", reason="cancelled")
-                        llm_config = cfg.lm_studio if cfg.llm_backend == "lm_studio" else cfg.ollama
-                        return idx, pro_analyze(
-                            candidate.mail, llm_config, cfg.llm_backend,
-                            fast_reason=candidate.reason,
-                            fast_category=extract_fast_category(candidate.reason),
-                            cancel_event=cancel_event,
-                        )
+                    llm_worker = LLMWorker(cfg=cfg, cancel_event=cancel_event)
 
                     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                        futures = {executor.submit(_llm_worker, (i, c)): i for i, c in enumerate(sil_candidates)}
+                        futures = {executor.submit(llm_worker, (i, c)): i for i, c in enumerate(sil_candidates)}
                         temp_results = [None] * len(sil_candidates)
                         done_count = 0
                         
@@ -404,18 +503,14 @@ def main(
                 TimeElapsedColumn(), console=console, transient=True
             ) as progress:
                 task = progress.add_task("analyze", total=len(mails), current="Starting…")
-                state = {"done": 0, "pending": 0}
-                
-                def _on_analyze(result: ScanResult) -> None:
-                    scan_results.append(result)
-                    state["done"] += 1
-                    state["pending"] += 1
-                    if state["pending"] >= 20 or state["done"] == len(mails):
-                        subj = clean_text(result.mail.subject, max_len=24)
-                        progress.update(task, advance=state["pending"], current=f"{'SIL' if result.decision == 'SIL' else 'TUT'} {subj}")
-                        state["pending"] = 0
-
-                _, raw_stats = engine.analyze(mails, progress_cb=_on_analyze)
+                analyze_handler = AnalyzeProgressHandler(
+                    scan_results=scan_results,
+                    progress=progress,
+                    task_id=task,
+                    total_count=len(mails),
+                    clean_text_fn=clean_text,
+                )
+                _, raw_stats = engine.analyze(mails, progress_cb=analyze_handler)
 
         # Build final stats object
         for r in scan_results:
@@ -438,10 +533,21 @@ def main(
             export_scan_results(to_delete, export_file)
 
         if cfg.dry_run:
+            log_file = save_cleanup_log(
+                to_delete,
+                stats,
+                cfg.provider.value,
+                cfg.mode.value,
+                dry_run=True,
+                action="preview",
+            )
             console.print(Panel(
-                f"[bold]{len(to_delete)}[/bold] mesaj silinebilir olarak işaretlendi.\n[dim]Dry run modu | henüz hiçbir şey silinmedi.[/dim]",
+                f"[bold]{len(to_delete)}[/bold] mesaj silinebilir olarak işaretlendi.\n"
+                "[dim]Dry run modu | henüz hiçbir şey silinmedi.[/dim]\n"
+                f"[dim]Log kaydedildi: {log_file}[/dim]",
                 title="[bold yellow]Dry Run Tamamlandı[/bold yellow]", border_style="yellow", box=box.ROUNDED
             ))
+            return
 
         console.print("\n  [bold cyan][1][/bold cyan] Kalıcı Sil  [dim](geri alınamaz)[/dim]\n  [bold cyan][2][/bold cyan] Çöp Kutusuna Gönder\n  [bold cyan][3][/bold cyan] İptal\n")
         choice = Prompt.ask(f"[bold]{len(to_delete)} mesaj için ne yapmak istersiniz?[/bold]", choices=["1", "2", "3"], default="3")
@@ -463,7 +569,14 @@ def main(
                           engine.move_to_trash(delete_uids, trash_folder, progress_cb=cb)
 
             deleted_results = [r for r in to_delete if r.mail.uid in deleted]
-            log_file = save_cleanup_log(deleted_results, stats, cfg.provider.value, cfg.mode.value)
+            log_file = save_cleanup_log(
+                deleted_results,
+                stats,
+                cfg.provider.value,
+                cfg.mode.value,
+                dry_run=False,
+                action="delete" if choice == "1" else "trash",
+            )
 
             if not deleted:
                 console.print(Panel(
