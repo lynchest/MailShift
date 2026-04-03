@@ -426,7 +426,14 @@ def install_ollama() -> bool:
             if not Confirm.ask("[bold yellow]PowerShell betiği ile otomatik kurulum denensin mi?[/bold yellow]", default=False):
                 console.print("[red]Otomatik kurulum iptal edildi. Lütfen Ollama'yı siteden indirip kurun: https://ollama.com[/red]")
                 return False
-            command = ["powershell", "-Command", "irm https://ollama.com/install.ps1 | iex"]
+            command = [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "Invoke-Expression (Invoke-RestMethod 'https://ollama.com/install.ps1')",
+            ]
             title = "Ollama PowerShell betiği ile kuruluyor..."
         else:
             command = [

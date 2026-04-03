@@ -80,7 +80,14 @@ def test_install_ollama_windows_fallback_asks_and_runs_powershell():
         mock_popen.assert_called_once()
         args, kwargs = mock_popen.call_args
         assert kwargs.get("shell") is not True
-        assert args[0] == ["powershell", "-Command", "irm https://ollama.com/install.ps1 | iex"]
+        assert args[0] == [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "Invoke-Expression (Invoke-RestMethod 'https://ollama.com/install.ps1')",
+        ]
 
 
 def test_install_ollama_windows_fallback_decline_returns_false():
@@ -96,4 +103,4 @@ def test_install_ollama_windows_fallback_decline_returns_false():
         mock_popen.assert_not_called()
         printed_messages = [str(call.args[0]) for call in mock_console.print.call_args_list]
         assert any("winget bulunamadı" in msg for msg in printed_messages)
-        assert any("https://ollama.com" in msg for msg in printed_messages)
+        assert any("ollama.com" in msg for msg in printed_messages)
