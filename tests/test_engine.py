@@ -167,7 +167,7 @@ def test_ollama_config_defaults():
     cfg = OllamaConfig()
     assert cfg.base_url == "http://localhost:11434"
     assert cfg.model == "qwen3.5:0.8B"
-    assert cfg.max_body_chars == 250 # 500'den 250'ye düşürülmüş olabilir
+    assert cfg.max_body_chars == 250
     assert "SIL" in cfg.system_prompt
     assert "TUT" in cfg.system_prompt
 

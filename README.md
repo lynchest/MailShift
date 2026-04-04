@@ -15,6 +15,7 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 ## Features
 
 - **Multi provider support**: Gmail (IMAP + App Password), Proton Mail (Requires [Proton Bridge](https://proton.me/mail/bridge) and a paid account), and Custom IMAP servers
+- **Proton Bridge preflight check**: Proton mode probes `127.0.0.1:1143` before IMAP login and guides you to start Bridge with a retry prompt
 - **Attachment protection**: Emails with attachments are never deleted
 - **Phishing detection limitation**: This tool is not designed to detect and delete phishing emails. LLM models cannot reliably distinguish between phishing and legitimate emails.
 - **Fast-mode safety guards**: Premium lifecycle expiry notices, verification code (OTP) emails, and Google Drive/cloud storage fullness alerts are force-kept in Fast mode before junk checks
@@ -33,6 +34,7 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
     - **LM Studio server lifecycle**: If LM Studio is installed but local server is not running, MailShift can auto-run `lms server start`; if it started the server itself, it attempts `lms server stop` during cleanup
 - **Body preview in Pro mode**: Fetches email body content for better LLM analysis
 - **Dry-run default** – preview before any deletion
+- **Dry-run history logs**: Dry-run candidate results are also saved under `logs/cleanup_log_*.json` for later review
 - **OS Keyring** (Windows Credential Manager) — stores provider-based credentials securely via the `keyring` library for the interactive "reuse previous credentials" prompt. No longer stored in plain-text JSON files.
 - **Delete options**: Permanent delete or move to Trash
 - **Resilient IMAP deletion**: Delete/trash chunks and expunge retry with exponential back-off and automatic IMAP reconnect on SSL/EOF disconnects
@@ -77,6 +79,11 @@ python main.py --provider gmail --mode pro \
 python main.py --provider gmail --mode pro \
     --username you@gmail.com --password "app-password" --no-dry-run
 
+# Scan only a date window (IMAP SINCE/BEFORE)
+python main.py --provider gmail --mode fast \
+    --username you@gmail.com --password "app-password" \
+    --since 2025-01-01 --before 2026-01-01
+
 # Move to Trash instead of permanent delete
 # (select option 2 when prompted)
 
@@ -119,6 +126,8 @@ python main.py --provider gmail --mode pro \
 | `--dry-run` | Preview only (no deletion) | enabled |
 | `--no-dry-run` | Actually delete emails | - |
 | `--scan-limit` | Max messages to scan | all |
+| `--since` | Scan emails on/after date (`YYYY-MM-DD` or `DD-Mon-YYYY`) | - |
+| `--before` | Scan emails before date (`YYYY-MM-DD` or `DD-Mon-YYYY`) | - |
 | `--ollama-url` | Ollama API URL | `http://localhost:11434` |
 | `--ollama-model` | Ollama model | `qwen3.5:2B` |
 | `--ollama-prompt` | Custom system prompt for LLM | default prompt |
@@ -194,6 +203,7 @@ whitelist.json   Keywords → always keep
 ## Proton Bridge
 
 Run Proton Bridge locally, then connect with bridge credentials.
+If Bridge is closed, MailShift now checks `127.0.0.1:1143` first and prompts you to start Bridge before retrying IMAP login.
 
 ## Requirements
 

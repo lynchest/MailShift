@@ -11,6 +11,11 @@ import re
 from ...config.config import keyword_manager
 from ...models.models import MailMeta, ScanResult
 
+# Backwards-compatible module-level pattern names used by tests
+# Tests patch `mailshift.core.analyzers.fast.WHITELIST_PATTERN` / `JUNK_PATTERN`.
+WHITELIST_PATTERN = None
+JUNK_PATTERN = None
+
 # re.IGNORECASE flag'i kaldırıldı (metin zaten normalize ediliyor).
 # Yakalama gerektirmeyen (Non-capturing) gruplar (?:...) kullanılarak regex motorunun bellek tahsisi azaltıldı.
 _ALWAYS_KEEP_PATTERN = re.compile(
@@ -46,11 +51,14 @@ def _normalize(text: str | None) -> str:
 
 def extract_fast_category(reason: str) -> str:
     """Extracts the category from a reason string formatted as 'heuristic:category:token'"""
+    # Non-heuristic reasons don't have a category (return empty string)
     if not reason.startswith("heuristic:"):
-        return "uncategorized"
+        return ""
+    # Expecting format: heuristic:category:token
     parts = reason.split(":", 2)
-    if len(parts) >= 2:
+    if len(parts) == 3:
         return parts[1]
+    # No category provided
     return "uncategorized"
 
 
@@ -71,8 +79,13 @@ def fast_analyze(meta: MailMeta) -> ScanResult:
     header_text = f"{subject_text} {sender_text}"
 
     # Referansı yerel değişkene alıyoruz ki lookup hızı artsın
-    wl_pattern = keyword_manager.whitelist_pattern
-    junk_pattern = keyword_manager.junk_pattern
+    # Prefer module-level patched patterns (tests) and fall back to keyword_manager.
+    wl_pattern = globals().get("WHITELIST_PATTERN")
+    if wl_pattern is None:
+        wl_pattern = keyword_manager.whitelist_pattern
+    junk_pattern = globals().get("JUNK_PATTERN")
+    if junk_pattern is None:
+        junk_pattern = keyword_manager.junk_pattern
 
     # 3. Whitelist Kontrolü (Önce sadece Header'da)
     if wl_pattern:
@@ -107,4 +120,4 @@ def fast_analyze(meta: MailMeta) -> ScanResult:
             return ScanResult(mail=meta, decision="SIL", reason=f"heuristic:{category}:{matched_token}")
 
     # 7. Varsayılan (Eşleşme Yok)
-    return ScanResult(mail=meta, decision="TUT", reason="no_match")
+    return ScanResult(mail=meta, decision="TUT", reason="no match")

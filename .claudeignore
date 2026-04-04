@@ -1,0 +1,70 @@
+# Claude ignore: exclude common build, cache, env, logs, and sensitive files
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Python virtual environments and caches
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+target/
+src-tauri/target/
+
+# Logs, databases and runtime files
+logs/
+logs/**
+*.log
+mailshift.db
+*.sqlite
+*.sqlite3
+*.db
+
+# Coverage and test artifacts
+.coverage
+coverage.xml
+htmlcov/
+
+# Editor/IDE directories
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS and temp files
+.DS_Store
+Thumbs.db
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Secrets and local env
+.env
+.env.*
+secrets/
+.secrets/
+local_settings.py
+
+# Misc caches and tools
+.cache/
+.tox/

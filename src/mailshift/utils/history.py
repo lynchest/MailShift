@@ -34,6 +34,10 @@ def save_cleanup_log(
 
     mode: str,
 
+    dry_run: bool = False,
+
+    action: str = "delete",
+
 ) -> str:
 
     """Save cleanup results to a log file. Returns the log file path."""
@@ -44,6 +48,9 @@ def save_cleanup_log(
 
     
 
+    actual_deleted_count = 0 if dry_run else len(deleted_results)
+    candidate_count = len(deleted_results)
+
     log_data = {
 
         "timestamp": datetime.now().isoformat(),
@@ -51,6 +58,10 @@ def save_cleanup_log(
         "provider": provider,
 
         "mode": mode,
+
+        "is_dry_run": dry_run,
+
+        "action": action,
 
         "stats": {
 
@@ -60,7 +71,9 @@ def save_cleanup_log(
 
             "space_saved_mb": round(stats.space_saved_mb, 2),
 
-            "deleted_count": len(deleted_results),
+            "deleted_count": actual_deleted_count,
+
+            "candidate_count": candidate_count,
 
         },
 
@@ -258,13 +271,22 @@ def print_history() -> None:
 
             deleted_msgs = data.get("deleted_messages", [])
 
+            is_dry_run = bool(data.get("is_dry_run", False))
+            mode_label = f"{mode} (dry-run)" if is_dry_run else mode
+            count_label = "Aday" if is_dry_run else "Silinen"
+            count_value = (
+                stats.get("candidate_count", len(deleted_msgs))
+                if is_dry_run
+                else stats.get("deleted_count", len(deleted_msgs))
+            )
+
 
 
             header = (
 
-                f"[bold]Provider:[/bold] {provider}  [bold]Mode:[/bold] {mode}\n"
+                f"[bold]Provider:[/bold] {provider}  [bold]Mode:[/bold] {mode_label}\n"
 
-                f"[bold]Silinen:[/bold] {stats.get('deleted_count', 0)}  "
+                f"[bold]{count_label}:[/bold] {count_value}  "
 
                 f"[bold]Kazanılan alan:[/bold] {stats.get('space_saved_mb', 0):.2f} MB"
 
@@ -324,7 +346,7 @@ def print_history() -> None:
 
                 title=f"[dim]{timestamp}[/dim]",
 
-                border_style="blue",
+                border_style="yellow" if is_dry_run else "blue",
 
                 box=box.ROUNDED,
 

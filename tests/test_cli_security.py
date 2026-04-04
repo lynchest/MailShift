@@ -1,28 +1,4 @@
-import sys
-from unittest.mock import patch, MagicMock
-
-# Mock dependencies before importing mailshift.ui.cli
-mock_rich = MagicMock()
-mock_requests = MagicMock()
-mock_psutil = MagicMock()
-mock_bs4 = MagicMock()
-
-sys.modules["rich"] = mock_rich
-sys.modules["rich.panel"] = mock_rich.panel
-sys.modules["rich.progress"] = mock_rich.progress
-sys.modules["rich.prompt"] = mock_rich.prompt
-sys.modules["rich.table"] = mock_rich.table
-sys.modules["rich.box"] = mock_rich.box
-sys.modules["requests"] = mock_requests
-sys.modules["psutil"] = mock_psutil
-sys.modules["bs4"] = mock_bs4
-
-import pytest
-
-# Mock internal package imports
-sys.modules["mailshift.config.config"] = MagicMock()
-sys.modules["mailshift.ui.styles"] = MagicMock()
-sys.modules["mailshift.utils.paths"] = MagicMock()
+from unittest.mock import MagicMock, patch
 
 from mailshift.ui.cli import install_ollama
 

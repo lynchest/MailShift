@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 from pydantic import ValidationError
 
 from mailshift.config.config import (
@@ -11,6 +11,10 @@ from mailshift.config.config import (
     AppConfig,
     build_imap_config,
     KeywordManager,
+    add_to_whitelist,
+    remove_from_whitelist,
+    add_to_blacklist,
+    remove_from_blacklist,
 )
 
 
@@ -51,6 +55,8 @@ def test_app_config_initialization():
     assert app_cfg.mode == Mode.FAST
     assert app_cfg.dry_run is True
     assert app_cfg.scan_limit is None
+    assert app_cfg.since is None
+    assert app_cfg.before is None
     assert isinstance(app_cfg.ollama, OllamaConfig)
     assert isinstance(app_cfg.rate_limit, RateLimitConfig)
 
@@ -173,3 +179,29 @@ def test_keyword_manager_get_category_for_match(empty_keyword_manager):
 
     # Scenario 4: Unknown token
     assert km.get_category_for_match("random") == "uncategorized"
+
+
+@patch("mailshift.config.config.keyword_manager")
+def test_keywords_management_api_proxies(manager_mock):
+    """Verify that module-level helper functions correctly proxy calls to the keyword_manager instance."""
+    manager_mock.add_whitelist.return_value = True
+    assert add_to_whitelist("urgent") is True
+    manager_mock.add_whitelist.assert_called_with("urgent")
+
+    manager_mock.add_whitelist.return_value = False
+    assert add_to_whitelist("urgent") is False
+
+    manager_mock.remove_whitelist.return_value = True
+    assert remove_from_whitelist("important") is True
+    manager_mock.remove_whitelist.assert_called_with("important")
+
+    manager_mock.remove_whitelist.return_value = False
+    assert remove_from_whitelist("missing") is False
+
+    manager_mock.add_blacklist.return_value = True
+    assert add_to_blacklist("offer") is True
+    manager_mock.add_blacklist.assert_called_with("offer")
+
+    manager_mock.remove_blacklist.return_value = True
+    assert remove_from_blacklist("spam") is True
+    manager_mock.remove_blacklist.assert_called_with("spam")

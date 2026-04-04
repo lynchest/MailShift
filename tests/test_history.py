@@ -62,6 +62,44 @@ def test_save_cleanup_log(monkeypatch, tmp_path):
     assert data["stats"]["space_saved_mb"] == 1.0
 
 
+def test_save_cleanup_log_dry_run_includes_preview_metadata(monkeypatch, tmp_path):
+    original_get_path = history.get_path
+
+    def mock_get_path(name):
+        if name == "logs":
+            return tmp_path / "logs"
+        return original_get_path(name)
+
+    monkeypatch.setattr(history, "get_path", mock_get_path)
+
+    stats = ScanStats(total_scanned=3, marked_for_deletion=2, marked_size_bytes=2048)
+    results = [
+        ScanResult(
+            mail=MailMeta(uid="11", subject="Promo", sender="x", size_bytes=1024, date="2025"),
+            decision="SIL",
+            reason="promotion",
+        )
+    ]
+
+    log_file_path = history.save_cleanup_log(
+        deleted_results=results,
+        stats=stats,
+        provider="proton",
+        mode="fast",
+        dry_run=True,
+        action="preview",
+    )
+
+    with open(log_file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert data["is_dry_run"] is True
+    assert data["action"] == "preview"
+    assert data["stats"]["deleted_count"] == 0
+    assert data["stats"]["candidate_count"] == 1
+    assert len(data["deleted_messages"]) == 1
+
+
 def test_export_scan_results_json(tmp_path):
     output_path = tmp_path / "results.json"
     

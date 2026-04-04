@@ -55,7 +55,7 @@ def test_fast_analyze_whitelist_priority_over_other_rules():
          patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("offer|no-reply", re.IGNORECASE)):
         meta = MailMeta(
             uid="100",
-            subject="Important verification code",
+            subject="important verification code",
             sender="no-reply@example.com",
             body_preview="Your verification code is 123456",
         )
@@ -64,6 +64,7 @@ def test_fast_analyze_whitelist_priority_over_other_rules():
         assert result.reason == "whitelist:important"
 
 
+@patch("mailshift.core.analyzers.fast.keyword_manager.whitelist_pattern", None)
 @patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
 @patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("no-reply|offer", re.IGNORECASE))
 def test_fast_analyze_premium_expiry_is_kept():
@@ -78,6 +79,7 @@ def test_fast_analyze_premium_expiry_is_kept():
     assert result.reason.startswith("safe-guard:")
 
 
+@patch("mailshift.core.analyzers.fast.keyword_manager.whitelist_pattern", None)
 @patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
 @patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("no-reply|offer", re.IGNORECASE))
 def test_fast_analyze_verification_code_is_kept():
@@ -92,6 +94,7 @@ def test_fast_analyze_verification_code_is_kept():
     assert result.reason.startswith("safe-guard:")
 
 
+@patch("mailshift.core.analyzers.fast.keyword_manager.whitelist_pattern", None)
 @patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
 @patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("no-reply|offer", re.IGNORECASE))
 def test_fast_analyze_drive_storage_alert_is_kept():
@@ -106,6 +109,7 @@ def test_fast_analyze_drive_storage_alert_is_kept():
     assert result.reason.startswith("safe-guard:")
 
 
+@patch("mailshift.core.analyzers.fast.keyword_manager.whitelist_pattern", None)
 @patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
 @patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("no-reply|noreply", re.IGNORECASE))
 def test_fast_analyze_noreply_sender_not_flagged():
@@ -121,6 +125,7 @@ def test_fast_analyze_noreply_sender_not_flagged():
     assert result.reason == "no match"
 
 
+@patch("mailshift.core.analyzers.fast.keyword_manager.whitelist_pattern", None)
 @patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
 @patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("indirim", re.IGNORECASE))
 def test_fast_analyze_turkish_dotted_i_normalized():
@@ -136,6 +141,7 @@ def test_fast_analyze_turkish_dotted_i_normalized():
     assert result.reason.startswith("heuristic:")
 
 
+@patch("mailshift.core.analyzers.fast.keyword_manager.whitelist_pattern", None)
 @patch("mailshift.core.analyzers.fast.WHITELIST_PATTERN", None)
 @patch("mailshift.core.analyzers.fast.JUNK_PATTERN", re.compile("offer|discount", re.IGNORECASE))
 def test_fast_analyze_phishing_is_kept():
