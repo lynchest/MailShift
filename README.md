@@ -43,6 +43,10 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 - **Auto worker calculation** – automatically calculates optimal thread count based on hardware
     - Detects NVIDIA GPUs and Intel/AMD GPUs on Windows for Pro mode worker sizing
     - Intel/AMD integrated GPU VRAM may be estimated from shared system RAM when dedicated VRAM is not exposed by the driver
+    - Manual worker input is safety-clamped to a backend-aware upper limit (VRAM/RAM/CPU caps); CLI prints a clear warning when clamped
+    - Fast mode does not use worker parallelism for analysis; configuration panel shows workers as "not used" to avoid misleading UX
+    - Pro mode auto-worker can learn from previous phase-2 metrics (timeout/error/p95 latency) and warm-start the next run from local `worker_profiles.json` recommendations
+    - Power users can enable a one-time hardware worker probe with `--power-worker-probe`; this preference is persisted in `power_user_settings.json` and reused in later runs
 - **Cache support** – skip re-fetching headers on repeat scans
 - **Rich CLI UI** – progress bars, tables, colored output with Turkish/English
     - Progress status labels are sanitized and shortened to stay single-line on narrow terminals (prevents duplicated-looking bars)
@@ -132,6 +136,9 @@ python main.py --provider gmail --mode pro \
 | `--ollama-url` | Ollama API URL | `http://localhost:11434` |
 | `--ollama-model` | Ollama model | `qwen3.5:2B` |
 | `--ollama-prompt` | Custom system prompt for LLM | default prompt |
+| `--workers` | Manual worker hint (Pro mode); values above safe limit are auto-clamped | auto |
+| `--power-worker-probe` | Enable persisted power-user hardware probe for worker auto tuning | saved preference |
+| `--no-power-worker-probe` | Disable persisted power-user hardware probe | saved preference |
 | `--history` | Show cleanup history | - |
 | `--export` | Export results to CSV/JSON | - |
 | `--uninstall` | Remove MailShift from system | - |

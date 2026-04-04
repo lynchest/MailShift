@@ -118,3 +118,47 @@ def test_llm_worker_passes_fast_reason_and_category(monkeypatch) -> None:
         "fast_reason": "heuristic:promotion:discount",
         "fast_category": "promotion",
     }
+
+
+def test_adaptive_worker_controller_reduces_workers_on_overload() -> None:
+    controller = session_helpers.AdaptiveWorkerController(
+        initial_workers=6,
+        max_workers=6,
+        timeout_seconds=20,
+    )
+
+    for latency in (15.0, 17.0, 16.0, 18.0):
+        controller.observe(latency, "llm-timeout")
+
+    next_workers, reason, snapshot = controller.evaluate_window()
+
+    assert next_workers == 5
+    assert "overload" in reason
+    assert snapshot.sample_count == 4
+    assert snapshot.timeout_rate == 1.0
+
+
+def test_adaptive_worker_controller_increases_workers_after_stable_windows() -> None:
+    controller = session_helpers.AdaptiveWorkerController(
+        initial_workers=2,
+        max_workers=4,
+        timeout_seconds=20,
+        stable_windows_required=2,
+    )
+
+    for latency in (1.1, 1.2, 1.0):
+        controller.observe(latency, "llm:TUT - ok")
+    first_workers, _, _ = controller.evaluate_window()
+
+    for latency in (1.3, 1.1, 1.2):
+        controller.observe(latency, "llm:TUT - ok")
+    second_workers, reason, _ = controller.evaluate_window()
+
+    overall = controller.overall_snapshot()
+
+    assert first_workers == 2
+    assert second_workers == 3
+    assert "stable" in reason
+    assert overall.sample_count == 6
+    assert overall.timeout_rate == 0.0
+    assert overall.error_rate == 0.0

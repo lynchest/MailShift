@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from mailshift.utils.hardware import calculate_optimal_workers, get_system_info
+from mailshift.utils.hardware import calculate_optimal_workers, get_system_info, resolve_worker_plan
 
 
 class _VM:
@@ -243,3 +243,215 @@ def test_calculate_optimal_workers_manual_override(mock_get_system_info):
     # 2B model requirement ~0.15. 0.2 / 0.15 = 1.3 -> 1 worker
     workers = calculate_optimal_workers("qwen3.5:2B", mode="pro", manual_workers=10)
     assert workers == 1
+
+
+@patch("mailshift.utils.hardware.get_system_info")
+def test_calculate_optimal_workers_clamps_manual_override_in_cpu_mode(mock_get_system_info):
+    info = type(
+        "SysInfo",
+        (),
+        {
+            "cpu_count": 8,
+            "total_ram_gb": 32.0,
+            "available_ram_gb": 12.0,
+            "has_gpu": False,
+            "gpu_name": "None",
+            "vram_total_gb": 0.0,
+            "vram_available_gb": 0.0,
+            "gpu_driver": "None",
+        },
+    )
+    mock_get_system_info.return_value = info
+
+    workers = calculate_optimal_workers("qwen3.5:4B", mode="pro", manual_workers=20)
+    assert workers == 2
+
+
+@patch("mailshift.utils.hardware.get_system_info")
+def test_resolve_worker_plan_clamps_to_lm_studio_backend_limit(mock_get_system_info):
+    info = type(
+        "SysInfo",
+        (),
+        {
+            "cpu_count": 12,
+            "total_ram_gb": 32.0,
+            "available_ram_gb": 16.0,
+            "has_gpu": True,
+            "gpu_name": "NVIDIA RTX 3060",
+            "vram_total_gb": 12.0,
+            "vram_available_gb": 8.0,
+            "gpu_driver": "x",
+        },
+    )
+    mock_get_system_info.return_value = info
+
+    plan = resolve_worker_plan("qwen3.5:2B", mode="pro", manual_workers=12, backend="lm_studio")
+
+    assert plan.workers == 10
+    assert plan.was_clamped is True
+    assert "backend-cap=10" in plan.reason
+
+
+@patch("mailshift.utils.hardware.get_system_info")
+def test_resolve_worker_plan_applies_ollama_env_cap_as_upper_limit(mock_get_system_info):
+    info = type(
+        "SysInfo",
+        (),
+        {
+            "cpu_count": 12,
+            "total_ram_gb": 32.0,
+            "available_ram_gb": 16.0,
+            "has_gpu": True,
+            "gpu_name": "NVIDIA RTX 3060",
+            "vram_total_gb": 12.0,
+            "vram_available_gb": 8.0,
+            "gpu_driver": "x",
+        },
+    )
+    mock_get_system_info.return_value = info
+
+    with patch.dict("mailshift.utils.hardware.os.environ", {"OLLAMA_NUM_PARALLEL": "3"}):
+        plan = resolve_worker_plan("qwen3.5:2B", mode="pro", manual_workers=8, backend="ollama")
+
+    assert plan.workers == 3
+    assert plan.was_clamped is True
+    assert "env-cap=3" in plan.reason
+
+
+@patch("mailshift.utils.hardware.get_recommended_worker", return_value=3)
+@patch("mailshift.utils.hardware.get_system_info")
+def test_resolve_worker_plan_uses_profile_warm_start_for_auto(
+    mock_get_system_info,
+    _mock_get_recommended_worker,
+):
+    info = type(
+        "SysInfo",
+        (),
+        {
+            "cpu_count": 12,
+            "total_ram_gb": 32.0,
+            "available_ram_gb": 16.0,
+            "has_gpu": True,
+            "gpu_name": "NVIDIA RTX 3060",
+            "vram_total_gb": 12.0,
+            "vram_available_gb": 8.0,
+            "gpu_driver": "x",
+        },
+    )
+    mock_get_system_info.return_value = info
+
+    plan = resolve_worker_plan("qwen3.5:2B", mode="pro", manual_workers=None, backend="ollama")
+
+    assert plan.workers == 3
+    assert plan.source == "auto-profile"
+    assert "profile-warm-start=3" in plan.reason
+
+
+@patch("mailshift.utils.hardware.get_recommended_worker", return_value=3)
+@patch("mailshift.utils.hardware.get_system_info")
+def test_resolve_worker_plan_manual_override_takes_priority_over_profile(
+    mock_get_system_info,
+    _mock_get_recommended_worker,
+):
+    info = type(
+        "SysInfo",
+        (),
+        {
+            "cpu_count": 12,
+            "total_ram_gb": 32.0,
+            "available_ram_gb": 16.0,
+            "has_gpu": True,
+            "gpu_name": "NVIDIA RTX 3060",
+            "vram_total_gb": 12.0,
+            "vram_available_gb": 8.0,
+            "gpu_driver": "x",
+        },
+    )
+    mock_get_system_info.return_value = info
+
+    plan = resolve_worker_plan("qwen3.5:2B", mode="pro", manual_workers=5, backend="ollama")
+
+    assert plan.workers == 5
+    assert plan.source == "manual"
+
+
+@patch("mailshift.utils.hardware.set_recommended_worker", return_value=4)
+@patch("mailshift.utils.hardware.run_worker_hardware_probe", return_value=4)
+@patch("mailshift.utils.hardware.get_recommended_worker", return_value=None)
+@patch("mailshift.utils.hardware.get_system_info")
+def test_resolve_worker_plan_runs_power_probe_when_enabled_and_no_warm_start(
+    mock_get_system_info,
+    mock_get_recommended_worker,
+    mock_run_probe,
+    mock_set_recommended,
+):
+    info = type(
+        "SysInfo",
+        (),
+        {
+            "cpu_count": 12,
+            "total_ram_gb": 32.0,
+            "available_ram_gb": 16.0,
+            "has_gpu": True,
+            "gpu_name": "NVIDIA RTX 3060",
+            "vram_total_gb": 12.0,
+            "vram_available_gb": 8.0,
+            "gpu_driver": "x",
+        },
+    )
+    mock_get_system_info.return_value = info
+
+    plan = resolve_worker_plan(
+        "qwen3.5:2B",
+        mode="pro",
+        manual_workers=None,
+        backend="ollama",
+        power_worker_probe=True,
+    )
+
+    assert plan.workers == 4
+    assert plan.source == "auto-probe"
+    assert "power-probe=4" in plan.reason
+    mock_get_recommended_worker.assert_called_once()
+    mock_run_probe.assert_called_once()
+    mock_set_recommended.assert_called_once()
+
+
+@patch("mailshift.utils.hardware.set_recommended_worker")
+@patch("mailshift.utils.hardware.run_worker_hardware_probe")
+@patch("mailshift.utils.hardware.get_recommended_worker", return_value=3)
+@patch("mailshift.utils.hardware.get_system_info")
+def test_resolve_worker_plan_skips_probe_when_profile_warm_start_exists(
+    mock_get_system_info,
+    _mock_get_recommended_worker,
+    mock_run_probe,
+    mock_set_recommended,
+):
+    info = type(
+        "SysInfo",
+        (),
+        {
+            "cpu_count": 12,
+            "total_ram_gb": 32.0,
+            "available_ram_gb": 16.0,
+            "has_gpu": True,
+            "gpu_name": "NVIDIA RTX 3060",
+            "vram_total_gb": 12.0,
+            "vram_available_gb": 8.0,
+            "gpu_driver": "x",
+        },
+    )
+    mock_get_system_info.return_value = info
+
+    plan = resolve_worker_plan(
+        "qwen3.5:2B",
+        mode="pro",
+        manual_workers=None,
+        backend="ollama",
+        power_worker_probe=True,
+    )
+
+    assert plan.workers == 3
+    assert plan.source == "auto-profile"
+    mock_run_probe.assert_not_called()
+    mock_set_recommended.assert_not_called()

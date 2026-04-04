@@ -291,3 +291,10 @@ def test_ollama_provider_sends_think_flag_and_qwen_budget():
         sent_payload = mock_session.post.call_args.kwargs["json"]
         assert sent_payload["think"] is False
         assert sent_payload["options"]["num_predict"] == 256
+
+
+def test_reason_helpers_detect_timeout_and_error_paths():
+    assert pro_analyzer.is_llm_timeout_reason("llm-timeout") is True
+    assert pro_analyzer.is_llm_timeout_reason("llm-error: request timed out") is True
+    assert pro_analyzer.is_llm_error_reason("llm-error: connection reset") is True
+    assert pro_analyzer.is_llm_error_reason("llm-timeout") is False

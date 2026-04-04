@@ -556,6 +556,22 @@ def prompt_llm_backend() -> str:
     clear_console()
     return "lm_studio" if choice == "1" else "ollama"
 
+
+def _prompt_manual_workers() -> Optional[int]:
+    worker_input = Prompt.ask(
+        "\n[bold cyan]Paralel işlemci (worker) sayısı[/bold cyan]\n"
+        "[dim](Boş bırakılırsa otomatik hesaplanır, manuel değer güvenli üst sınıra çekilebilir)[/dim]",
+        default=""
+    ).strip()
+
+    if not worker_input:
+        return None
+    if worker_input.isdigit() and int(worker_input) > 0:
+        return int(worker_input)
+
+    console.print("[yellow]Geçersiz worker değeri. Otomatik hesaplama kullanılacak.[/yellow]")
+    return None
+
 def _prompt_lm_studio_flow() -> tuple[Mode, str, str, Optional[int]]:
     available_models = get_lm_studio_models()
 
@@ -622,13 +638,8 @@ def _prompt_lm_studio_flow() -> tuple[Mode, str, str, Optional[int]]:
     choices = [str(i) for i in range(1, len(available_models) + 1)]
     model_choice = Prompt.ask("[bold]Model[/bold]", choices=choices, default="1")
     selected_model = available_models[int(model_choice) - 1]
-    
-    worker_input = Prompt.ask(
-        "\n[bold cyan]Paralel işlemci (worker) sayısı[/bold cyan]\n"
-        "[dim](Boş bırakılırsa sisteminiz için en uygun değer otomatik hesaplanır)[/dim]",
-        default=""
-    ).strip()
-    manual_workers = int(worker_input) if worker_input.isdigit() and int(worker_input) > 0 else None
+
+    manual_workers = _prompt_manual_workers()
     
     # Yeni Özellik: Model arka planda VRAM'e yükleniyor
     preload_model_in_background(selected_model, "lm_studio")
@@ -748,13 +759,7 @@ def prompt_mode() -> tuple[Mode, str, str, Optional[int]]:
                 console.print("[yellow]Model hazır olmadığı için Fast moduna geçiliyor.[/yellow]")
                 return Mode.FAST, "qwen3.5:2B", llm_backend
 
-        worker_input = Prompt.ask(
-            "\n[bold cyan]Paralel işlemci (worker) sayısı[/bold cyan]\n"
-            "[dim](Boş bırakılırsa sisteminiz için en uygun değer otomatik hesaplanır)[/dim]",
-            default=""
-        ).strip()
-        
-        manual_workers = int(worker_input) if worker_input.isdigit() and int(worker_input) > 0 else None
+        manual_workers = _prompt_manual_workers()
 
         # Yeni Özellik: Model arka planda VRAM'e yükleniyor
         preload_model_in_background(model, llm_backend)

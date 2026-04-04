@@ -117,8 +117,8 @@ def test_fast_analyze_whitelist_invoice_overrides_junk():
     )
     result = fast_analyze(meta)
     assert result.decision == "TUT"
-    # Whitelist eşleştiğinde artık reason boş veya wl kelimesi olur
-    assert result.reason in ("", "invoice")
+    assert result.reason.startswith("whitelist:")
+    assert "invoice" in result.reason
 
 
 def test_fast_analyze_whitelist_otp():

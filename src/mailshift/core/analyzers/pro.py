@@ -42,6 +42,26 @@ REASON_PATTERNS = [
     re.compile(r'this is\s+(a\s+\w+)\s+', re.IGNORECASE),
 ]
 
+
+def is_llm_timeout_reason(reason: str) -> bool:
+    """Return True when a result reason indicates timeout-like LLM failure."""
+    normalized = (reason or "").strip().lower()
+    if not normalized:
+        return False
+    return (
+        normalized.startswith("llm-timeout")
+        or " timed out" in normalized
+        or "timeout" in normalized
+    )
+
+
+def is_llm_error_reason(reason: str) -> bool:
+    """Return True when a result reason indicates non-timeout LLM/API failure."""
+    normalized = (reason or "").strip().lower()
+    if not normalized:
+        return False
+    return normalized.startswith("llm-error")
+
 def _parse_bool_env(value: str) -> Optional[bool]:
     lowered = (value or "").strip().lower()
     if lowered in {"1", "true", "yes", "on"}:

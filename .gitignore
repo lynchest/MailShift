@@ -12,6 +12,8 @@ build/
 *.log
 *.txt
 credentials.json
+worker_profiles.json
+power_user_settings.json
 
 # Virtual environments
 .venv/

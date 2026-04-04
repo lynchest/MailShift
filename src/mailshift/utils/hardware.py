@@ -10,8 +10,18 @@ import platform
 import subprocess
 import os
 import json
+import time
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
+
+from .worker_profile_store import (
+    WorkerProfileMetrics,
+    build_device_signature,
+    get_recommended_worker,
+    record_worker_profile_run,
+    set_recommended_worker,
+)
 
 try:
     import psutil
@@ -35,6 +45,19 @@ class SystemInfo:
     vram_total_gb: float
     vram_available_gb: float
     gpu_driver: str
+
+
+@dataclass(frozen=True)
+class WorkerPlan:
+    workers: int
+    requested_workers: Optional[int]
+    upper_limit: int
+    source: str
+    reason: str
+    backend: str
+    mode: str
+    is_effective: bool
+    was_clamped: bool
 
 
 def get_system_info() -> SystemInfo:
@@ -255,29 +278,112 @@ def get_vram_requirement(model_size_b: float) -> float:
     return 0.60
 
 
-def calculate_optimal_workers(
-    model_name: str, 
-    mode: str = "pro", 
+def _normalize_backend(backend: str) -> str:
+    return "lm_studio" if str(backend).lower() == "lm_studio" else "ollama"
+
+
+def _build_device_context(system_info: SystemInfo) -> dict[str, object]:
+    return {
+        "os": platform.system(),
+        "arch": platform.machine(),
+        "cpu_count": int(system_info.cpu_count),
+        "total_ram_gb": round(float(system_info.total_ram_gb), 1),
+        "gpu_name": system_info.gpu_name if system_info.has_gpu else "None",
+        "vram_total_gb": round(float(system_info.vram_total_gb), 1),
+    }
+
+
+def _build_signature(system_info: SystemInfo) -> str:
+    context = _build_device_context(system_info)
+    return build_device_signature(
+        os_name=str(context["os"]),
+        architecture=str(context["arch"]),
+        cpu_count=int(context["cpu_count"]),
+        total_ram_gb=float(context["total_ram_gb"]),
+        gpu_name=str(context["gpu_name"]),
+        vram_total_gb=float(context["vram_total_gb"]),
+    )
+
+
+def _probe_candidates(upper_limit: int) -> list[int]:
+    safe_upper = max(1, int(upper_limit))
+    candidates = {
+        1,
+        min(2, safe_upper),
+        max(1, safe_upper // 2),
+        safe_upper,
+    }
+    if safe_upper >= 4:
+        candidates.add(4)
+    if safe_upper >= 6:
+        candidates.add(6)
+    if safe_upper >= 8:
+        candidates.add(8)
+    return sorted(v for v in candidates if 1 <= v <= safe_upper)
+
+
+def _probe_task(seed: int) -> int:
+    value = seed & 0xFFFFFFFF
+    for _ in range(900):
+        value = (1664525 * value + 1013904223) & 0xFFFFFFFF
+    time.sleep(0.0015)
+    return value
+
+
+def run_worker_hardware_probe(upper_limit: int) -> int:
+    candidates = _probe_candidates(upper_limit)
+    if not candidates:
+        return 1
+    if len(candidates) == 1:
+        return candidates[0]
+
+    task_count = max(24, min(72, max(candidates) * 6))
+    throughput_by_worker: dict[int, float] = {}
+
+    for workers in candidates:
+        started = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(_probe_task, idx + workers) for idx in range(task_count)]
+            for future in as_completed(futures):
+                future.result()
+
+        elapsed = max(0.001, time.perf_counter() - started)
+        throughput_by_worker[workers] = task_count / elapsed
+
+    best_throughput = max(throughput_by_worker.values())
+    conservative_threshold = best_throughput * 0.97
+    viable_workers = [
+        workers
+        for workers, throughput in throughput_by_worker.items()
+        if throughput >= conservative_threshold
+    ]
+    if viable_workers:
+        return min(viable_workers)
+
+    return max(throughput_by_worker, key=throughput_by_worker.get)
+
+
+def resolve_worker_plan(
+    model_name: str,
+    mode: str = "pro",
     system_info: Optional[SystemInfo] = None,
     manual_workers: Optional[int] = None,
-    backend: str = "ollama"
-) -> int:
+    backend: str = "ollama",
+    power_worker_probe: bool = False,
+) -> WorkerPlan:
     system_info = system_info or get_system_info()
     model_size = detect_model_size(model_name)
+    mode_lower = mode.lower()
+    backend_name = _normalize_backend(backend)
 
-    if mode.lower() == "pro":
+    profile_warm_start: Optional[int] = None
+    probe_recommendation: Optional[int] = None
+
+    if mode_lower == "pro":
         if system_info.has_gpu and system_info.vram_available_gb > 0.5:
             overhead = get_vram_requirement(model_size)
-            # 0.5 GB güvenlik payı bırakıldı
-            safe_vram = system_info.vram_available_gb - 0.5 
+            safe_vram = max(0.0, system_info.vram_available_gb - 0.5)
             max_by_vram = max(1, int(safe_vram / overhead))
-
-            if manual_workers is not None and manual_workers > 0:
-                # Kullanıcı manuel atarsa, VRAM yetiyorsa izin ver, yetmiyorsa uyar/sınırla
-                if manual_workers > max_by_vram:
-                    # Log or warning could be here, but for now we follow safety
-                    return max_by_vram
-                return manual_workers
 
             base_ceiling = 2
             if system_info.vram_total_gb >= 20.0:
@@ -288,37 +394,173 @@ def calculate_optimal_workers(
                 base_ceiling = 4
 
             if model_size <= 1.0:
-                ceiling = base_ceiling * 3
+                backend_ceiling = base_ceiling * 3
             elif model_size <= 3.0:
-                ceiling = base_ceiling * 2
+                backend_ceiling = base_ceiling * 2
             else:
-                ceiling = base_ceiling
+                backend_ceiling = base_ceiling
 
-            if backend == "lm_studio":
-                ceiling = min(ceiling, 10)
+            if backend_name == "lm_studio":
+                backend_ceiling = min(backend_ceiling, 10)
 
-            env_limit = os.environ.get("OLLAMA_NUM_PARALLEL")
-            if env_limit and env_limit.isdigit() and backend == "ollama":
-                ceiling = int(env_limit)
+            env_limit = None
+            env_limit_raw = os.environ.get("OLLAMA_NUM_PARALLEL")
+            if backend_name == "ollama" and env_limit_raw and env_limit_raw.isdigit():
+                env_limit = max(1, int(env_limit_raw))
+                backend_ceiling = min(backend_ceiling, env_limit)
 
-            return min(max_by_vram, ceiling)
-            
-        # CPU Modu
-        if manual_workers is not None and manual_workers > 0:
-            return manual_workers
+            upper_limit = max(1, min(max_by_vram, backend_ceiling))
+            auto_workers = upper_limit
+            reason_parts = [f"gpu-vram-cap={max_by_vram}", f"backend-cap={backend_ceiling}"]
+            if env_limit is not None:
+                reason_parts.append(f"env-cap={env_limit}")
+            limit_reason = ", ".join(reason_parts)
+        else:
+            ram_per_worker = max(1.0, model_size * 1.2)
+            max_by_ram = max(1, int(system_info.available_ram_gb / ram_per_worker))
 
-        ram_per_worker = max(1.0, model_size * 1.2)
-        max_by_ram = int(system_info.available_ram_gb / ram_per_worker)
-        
-        cpu_ceiling = max(2, system_info.cpu_count - 2)
-        if backend == "lm_studio":
-            cpu_ceiling = min(cpu_ceiling, 6)
-            
-        return max(1, min(max_by_ram, cpu_ceiling))
-        
-    if manual_workers is not None and manual_workers > 0:
-        return manual_workers
-    return max(1, min(system_info.cpu_count, 16))
+            cpu_ceiling = max(2, system_info.cpu_count - 2)
+            if backend_name == "lm_studio":
+                cpu_ceiling = min(cpu_ceiling, 6)
+
+            upper_limit = max(1, min(max_by_ram, cpu_ceiling))
+            auto_workers = upper_limit
+            limit_reason = f"cpu-ram-cap={max_by_ram}, cpu-cap={cpu_ceiling}"
+
+        profile_warm_start = get_recommended_worker(
+            device_signature=_build_signature(system_info),
+            backend=backend_name,
+            model_name=model_name,
+            upper_limit=upper_limit,
+        )
+        if profile_warm_start is not None:
+            auto_workers = profile_warm_start
+            limit_reason = f"{limit_reason}, profile-warm-start={profile_warm_start}"
+        elif power_worker_probe:
+            probe_recommendation = run_worker_hardware_probe(upper_limit=upper_limit)
+            auto_workers = probe_recommendation
+            limit_reason = f"{limit_reason}, power-probe={probe_recommendation}"
+            set_recommended_worker(
+                device_signature=_build_signature(system_info),
+                backend=backend_name,
+                model_name=model_name,
+                recommended_workers=probe_recommendation,
+                upper_limit=upper_limit,
+                source="power-worker-probe",
+                device_context=_build_device_context(system_info),
+            )
+
+        is_effective = True
+    else:
+        upper_limit = max(1, min(system_info.cpu_count, 16))
+        auto_workers = upper_limit
+        limit_reason = f"fast-cpu-cap={upper_limit}"
+        is_effective = False
+
+    requested = manual_workers if manual_workers is not None and manual_workers > 0 else None
+    if requested is None:
+        return WorkerPlan(
+            workers=auto_workers,
+            requested_workers=None,
+            upper_limit=upper_limit,
+            source=(
+                "auto-probe" if probe_recommendation is not None
+                else "auto-profile" if profile_warm_start is not None
+                else "auto"
+            ),
+            reason=f"auto ({limit_reason})",
+            backend=backend_name,
+            mode=mode_lower,
+            is_effective=is_effective,
+            was_clamped=False,
+        )
+
+    workers = min(requested, upper_limit)
+    was_clamped = workers < requested
+    if was_clamped:
+        reason = f"manual {requested} -> {workers} (safe upper limit={upper_limit}; {limit_reason})"
+        source = "manual-clamped"
+    else:
+        reason = f"manual {requested} accepted (safe upper limit={upper_limit}; {limit_reason})"
+        source = "manual"
+
+    return WorkerPlan(
+        workers=workers,
+        requested_workers=requested,
+        upper_limit=upper_limit,
+        source=source,
+        reason=reason,
+        backend=backend_name,
+        mode=mode_lower,
+        is_effective=is_effective,
+        was_clamped=was_clamped,
+    )
+
+
+def persist_worker_profile_run(
+    model_name: str,
+    used_workers: int,
+    upper_limit: int,
+    sample_count: int,
+    timeout_rate: float,
+    error_rate: float,
+    p95_latency_s: float,
+    throughput: float,
+    backend: str = "ollama",
+    mode: str = "pro",
+    system_info: Optional[SystemInfo] = None,
+) -> Optional[int]:
+    mode_lower = str(mode).lower()
+    if mode_lower != "pro":
+        return None
+
+    safe_sample_count = max(0, int(sample_count or 0))
+    if safe_sample_count <= 0:
+        return None
+
+    info = system_info or get_system_info()
+    backend_name = _normalize_backend(backend)
+    device_context = _build_device_context(info)
+
+    metrics = WorkerProfileMetrics(
+        sample_count=safe_sample_count,
+        timeout_rate=max(0.0, float(timeout_rate or 0.0)),
+        error_rate=max(0.0, float(error_rate or 0.0)),
+        p95_latency_s=max(0.0, float(p95_latency_s or 0.0)),
+        throughput=max(0.0, float(throughput or 0.0)),
+    )
+
+    try:
+        return record_worker_profile_run(
+            device_signature=_build_signature(info),
+            backend=backend_name,
+            model_name=model_name,
+            observed_workers=max(1, int(used_workers)),
+            upper_limit=max(1, int(upper_limit)),
+            metrics=metrics,
+            device_context=device_context,
+        )
+    except Exception:
+        return None
+
+
+def calculate_optimal_workers(
+    model_name: str, 
+    mode: str = "pro", 
+    system_info: Optional[SystemInfo] = None,
+    manual_workers: Optional[int] = None,
+    backend: str = "ollama",
+    power_worker_probe: bool = False,
+) -> int:
+    plan = resolve_worker_plan(
+        model_name=model_name,
+        mode=mode,
+        system_info=system_info,
+        manual_workers=manual_workers,
+        backend=backend,
+        power_worker_probe=power_worker_probe,
+    )
+    return plan.workers
 
 
 def format_system_info(system_info: SystemInfo, mode: str, model_name: Optional[str] = None) -> str:

@@ -62,12 +62,17 @@ from .config.config import (
     build_imap_config,
 )
 from .utils.hardware import (
-    calculate_optimal_workers,
     format_system_info,
     get_system_info,
+    persist_worker_profile_run,
+    resolve_worker_plan,
+)
+from .utils.power_user_settings import (
+    get_worker_probe_preference,
+    set_worker_probe_preference,
 )
 from .core.engine import MailEngine, MailMeta, ScanResult, ScanStats
-from .core.session import AnalyzeProgressHandler, FetchProgressHandler, LLMWorker
+from .core.session import AnalyzeProgressHandler, FetchProgressHandler, LLMWorker, AdaptiveWorkerController
 from .db.database import save_mails_cache, load_mails_cache_by_uids
 from .core.analyzers.pro import (
     check_ollama_health,
@@ -243,6 +248,14 @@ def format_duration(seconds: float) -> str:
     return f"~{minutes} dk {sec:02d} sn" if minutes else f"~{sec} sn"
 
 
+def _run_llm_candidate(worker: LLMWorker, payload: tuple[int, ScanResult]) -> tuple[int, ScanResult, float]:
+    """Execute one LLM candidate and include elapsed latency for adaptive worker control."""
+    started = time.perf_counter()
+    idx, result = worker(payload)
+    elapsed = max(0.0, time.perf_counter() - started)
+    return idx, result, elapsed
+
+
 _IMAP_MONTH_TO_NUM = {
     "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
     "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
@@ -389,6 +402,11 @@ def verify_llm_health(cfg: AppConfig, selected_model: str) -> bool:
 @click.option("--list-keywords", "list_keywords_flag", is_flag=True, help="List all whitelist and blacklist keywords.")
 @click.option("--export", "export_file", default=None, help="Export scan results to CSV or JSON file.")
 @click.option("--workers", "-w", type=int, default=None, help="Number of workers for parallel processing.")
+@click.option(
+    "--power-worker-probe/--no-power-worker-probe",
+    default=None,
+    help="Power-user hardware probe for worker auto tuning (saved for future runs).",
+)
 def main(
     provider: Optional[str], mode: Optional[str], username: Optional[str],
     password: Optional[str], host: Optional[str], port: Optional[int],
@@ -399,6 +417,7 @@ def main(
     remove_whitelist: Optional[str], add_blacklist: Optional[str],
     remove_blacklist: Optional[str], list_keywords_flag: bool,
     export_file: Optional[str], workers: Optional[int],
+    power_worker_probe: Optional[bool],
 ) -> None:
     """MailShift | privacy-first newsletter purger for Gmail and Proton Mail."""
     log.info("Starting MailShift CLI")
@@ -443,13 +462,26 @@ def main(
     ollama_cfg = OllamaConfig(base_url=ollama_url, model=selected_model, system_prompt=sys_prompt)
     lm_studio_cfg = LMStudioConfig(model=selected_model if llm_backend == "lm_studio" else "", system_prompt=sys_prompt)
 
-    resolved_workers = calculate_optimal_workers(selected_model, resolved_mode.value, manual_workers=manual_workers, backend=llm_backend)
+    if power_worker_probe is None:
+        stored_probe_pref = get_worker_probe_preference()
+        power_worker_probe_enabled = bool(stored_probe_pref) if stored_probe_pref is not None else False
+    else:
+        power_worker_probe_enabled = set_worker_probe_preference(bool(power_worker_probe))
+
+    worker_plan = resolve_worker_plan(
+        selected_model,
+        resolved_mode.value,
+        manual_workers=manual_workers,
+        backend=llm_backend,
+        power_worker_probe=power_worker_probe_enabled,
+    )
+    resolved_workers = worker_plan.workers
 
     cfg = AppConfig(
         provider=resolved_provider, mode=resolved_mode, imap=imap_cfg,
         ollama=ollama_cfg, lm_studio=lm_studio_cfg, llm_backend=llm_backend,
         dry_run=dry_run, scan_limit=scan_limit, since=since_imap,
-        before=before_imap, max_workers=manual_workers,
+        before=before_imap, max_workers=resolved_workers,
     )
 
     clear_console()
@@ -458,6 +490,32 @@ def main(
     sys_info = get_system_info()
     model_display = f"Pro ({( 'LM Studio' if llm_backend == 'lm_studio' else 'Ollama' )}: {selected_model})" if resolved_mode == Mode.PRO else "Fast (heuristic)"
     hardware_info = format_system_info(sys_info, resolved_mode.value, selected_model)
+    if worker_plan.is_effective:
+        if worker_plan.source.startswith("manual"):
+            worker_mode = "[yellow](manual)[/yellow]"
+        elif worker_plan.source == "auto-probe":
+            worker_mode = "[green](auto-probe)[/green]"
+        elif worker_plan.source == "auto-profile":
+            worker_mode = "[cyan](auto-profile)[/cyan]"
+        else:
+            worker_mode = "[dim](auto)[/dim]"
+        worker_line = f"[bold]Workers:[/bold]  {resolved_workers} {worker_mode}"
+    else:
+        worker_line = "[bold]Workers:[/bold]  [dim]Kullanılmıyor (Fast mode)[/dim]"
+
+    if worker_plan.was_clamped:
+        console.print(
+            Panel(
+                "[bold yellow]Manuel worker değeri güvenli üst sınıra çekildi.[/bold yellow]\n"
+                f"[bold]İstenen:[/bold] {worker_plan.requested_workers}\n"
+                f"[bold]Kullanılan:[/bold] {worker_plan.workers}\n"
+                f"[dim]{worker_plan.reason}[/dim]",
+                title="[bold yellow]Worker Sınırı[/bold yellow]",
+                border_style="yellow",
+                box=box.ROUNDED,
+            )
+        )
+
     date_filter_lines: List[str] = []
     if since_imap:
         date_filter_lines.append(f"[bold]Since:[/bold]    {since_imap}")
@@ -470,13 +528,21 @@ def main(
             f"[bold]Provider:[/bold] {resolved_provider.value.capitalize()}\n"
             f"[bold]Mode:[/bold]     {model_display}\n"
             f"[bold]User:[/bold]     {username}\n"
-            f"[bold]Workers:[/bold]  {resolved_workers} {'[yellow](manual)[/yellow]' if manual_workers else '[dim](auto)[/dim]'}\n"
+            f"{worker_line}\n"
             f"{hardware_info}\n"
             f"[bold]Dry run:[/bold]  {'[yellow]Yes | no emails will be deleted[/yellow]' if dry_run else '[red]No | emails WILL be deleted[/red]'}"
             f"{date_filter_block}",
             title="[bold blue]Configuration[/bold blue]", border_style="blue", box=box.ROUNDED,
         )
     )
+
+    if resolved_mode == Mode.PRO:
+        tip_status = "Açık" if power_worker_probe_enabled else "Kapalı"
+        console.print(
+            "[dim][bold]Tips:[/bold] Power-user worker donanim testi icin "
+            "[cyan]--power-worker-probe[/cyan] kullanabilirsiniz. "
+            f"Mevcut durum: {tip_status}[/dim]"
+        )
 
     if cfg.mode == Mode.PRO:
         verify_llm_health(cfg, selected_model)
@@ -575,7 +641,16 @@ def main(
                         engine.fetch_body_for_cached_mails(need_body_mails, progress_cb=lambda m: None)
 
                 llm_verified: List[ScanResult] = []
-                max_workers = calculate_optimal_workers(selected_model, cfg.mode.value, manual_workers=cfg.max_workers)
+                max_workers = max(1, cfg.max_workers or 1)
+                llm_timeout_s = cfg.lm_studio.timeout if cfg.llm_backend == "lm_studio" else cfg.ollama.timeout
+                adaptive_workers = AdaptiveWorkerController(
+                    initial_workers=max_workers,
+                    max_workers=max_workers,
+                    min_workers=1,
+                    backend=cfg.llm_backend,
+                    timeout_seconds=llm_timeout_s,
+                )
+                indexed_candidates = list(enumerate(sil_candidates))
                 
                 with Progress(
                     SpinnerColumn(), TextColumn("[bold magenta]Phase 2 | LLM Verification[/bold magenta]"),
@@ -586,31 +661,110 @@ def main(
                     phase2_start = time.perf_counter()
                     llm_worker = LLMWorker(cfg=cfg, cancel_event=cancel_event)
 
-                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                        futures = {executor.submit(llm_worker, (i, c)): i for i, c in enumerate(sil_candidates)}
-                        temp_results = [None] * len(sil_candidates)
-                        done_count = 0
-                        
-                        for future in as_completed(futures):
-                            try:
-                                idx, res = future.result()
-                                temp_results[idx] = res
-                                subj = clean_text(res.mail.subject, max_len=24)
-                                icon = "SIL" if res.decision == "SIL" else "TUT"
-                                
-                                done_count += 1
-                                elapsed = max(0.001, time.perf_counter() - phase2_start)
-                                remaining = max(0.0, (len(sil_candidates) - done_count) * (elapsed / done_count))
-                                progress.update(task, advance=1, current=f"{icon} {subj} | kalan {format_duration(remaining)}")
-                            except Exception as exc:
-                                idx = futures[future]
-                                temp_results[idx] = ScanResult(mail=sil_candidates[idx].mail, decision="TUT", reason=f"llm-error:{exc}")
-                                progress.update(task, advance=1, current="⚠️ hata")
+                    temp_results = [None] * len(sil_candidates)
+                    done_count = 0
+                    cursor = 0
+
+                    while cursor < len(indexed_candidates):
+                        batch_workers = adaptive_workers.current_workers
+                        remaining_candidates = len(indexed_candidates) - cursor
+                        batch_size = min(remaining_candidates, max(batch_workers * 2, batch_workers))
+                        batch_items = indexed_candidates[cursor:cursor + batch_size]
+                        cursor += batch_size
+
+                        with ThreadPoolExecutor(max_workers=batch_workers) as executor:
+                            futures = {
+                                executor.submit(_run_llm_candidate, llm_worker, (idx, candidate)): idx
+                                for idx, candidate in batch_items
+                            }
+                            submitted_at = {future: time.perf_counter() for future in futures}
+
+                            for future in as_completed(futures):
+                                try:
+                                    idx, res, latency_s = future.result()
+                                    temp_results[idx] = res
+                                    adaptive_workers.observe(latency_s, res.reason)
+
+                                    subj = clean_text(res.mail.subject, max_len=24)
+                                    icon = "SIL" if res.decision == "SIL" else "TUT"
+                                    done_count += 1
+                                    elapsed = max(0.001, time.perf_counter() - phase2_start)
+                                    remaining = max(0.0, (len(sil_candidates) - done_count) * (elapsed / done_count))
+                                    progress.update(
+                                        task,
+                                        advance=1,
+                                        current=f"{icon} {subj} | w:{batch_workers} | kalan {format_duration(remaining)}",
+                                    )
+                                except Exception as exc:
+                                    idx = futures[future]
+                                    elapsed_s = max(0.0, time.perf_counter() - submitted_at[future])
+                                    fallback = ScanResult(mail=sil_candidates[idx].mail, decision="TUT", reason=f"llm-error:{exc}")
+                                    temp_results[idx] = fallback
+                                    adaptive_workers.observe(elapsed_s, fallback.reason)
+
+                                    done_count += 1
+                                    elapsed = max(0.001, time.perf_counter() - phase2_start)
+                                    remaining = max(0.0, (len(sil_candidates) - done_count) * (elapsed / done_count))
+                                    progress.update(
+                                        task,
+                                        advance=1,
+                                        current=f"TUT hata | w:{batch_workers} | kalan {format_duration(remaining)}",
+                                    )
+
+                        next_workers, adaptation_reason, snapshot = adaptive_workers.evaluate_window()
+                        if next_workers != batch_workers:
+                            log.warning(
+                                "Adaptive worker update: %s -> %s (timeout=%s, error=%s, p95=%.2fs; %s)",
+                                batch_workers,
+                                next_workers,
+                                f"{snapshot.timeout_rate:.1%}",
+                                f"{snapshot.error_rate:.1%}",
+                                snapshot.p95_latency_s,
+                                adaptation_reason,
+                            )
+                        else:
+                            log.debug(
+                                "Adaptive worker hold=%s (timeout=%s, error=%s, p95=%.2fs; %s)",
+                                batch_workers,
+                                f"{snapshot.timeout_rate:.1%}",
+                                f"{snapshot.error_rate:.1%}",
+                                snapshot.p95_latency_s,
+                                adaptation_reason,
+                            )
 
                     llm_verified = [r for r in temp_results if r is not None]
+                    phase2_elapsed_s = max(0.001, time.perf_counter() - phase2_start)
 
                 llm_confirmed = sum(1 for r in llm_verified if r.decision == "SIL")
                 console.print(f"[magenta]Phase 2 tamamlandı: [bold]{llm_confirmed}[/bold] silme onaylandı, [bold]{len(llm_verified) - llm_confirmed}[/bold] kurtarıldı.[/magenta]")
+                phase2_snapshot = adaptive_workers.overall_snapshot()
+                console.print(
+                    "[dim]Adaptif worker | "
+                    f"başlangıç {max_workers} -> son {adaptive_workers.current_workers} | "
+                    f"timeout {phase2_snapshot.timeout_rate:.1%} | "
+                    f"hata {phase2_snapshot.error_rate:.1%} | "
+                    f"p95 {phase2_snapshot.p95_latency_s:.1f}s[/dim]"
+                )
+
+                if worker_plan.source.startswith("auto"):
+                    learned_worker = persist_worker_profile_run(
+                        model_name=selected_model,
+                        used_workers=adaptive_workers.current_workers,
+                        upper_limit=worker_plan.upper_limit,
+                        sample_count=phase2_snapshot.sample_count,
+                        timeout_rate=phase2_snapshot.timeout_rate,
+                        error_rate=phase2_snapshot.error_rate,
+                        p95_latency_s=phase2_snapshot.p95_latency_s,
+                        throughput=(phase2_snapshot.sample_count / phase2_elapsed_s),
+                        backend=cfg.llm_backend,
+                        mode=cfg.mode.value,
+                        system_info=sys_info,
+                    )
+                    if learned_worker is not None:
+                        console.print(
+                            f"[dim]Profil ogrenme | sonraki calismada onerilen worker: {learned_worker}[/dim]"
+                        )
+
                 scan_results = tut_results + llm_verified
 
                 if cfg.llm_backend == "lm_studio":

@@ -4,6 +4,8 @@ session.py | Testable progress handlers and workers for CLI orchestration.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import math
 import threading
 import time
 from typing import Callable, Optional, Tuple
@@ -11,7 +13,154 @@ from typing import Callable, Optional, Tuple
 from ..config.config import AppConfig
 from ..models.models import MailMeta, ScanResult
 from .analyzers.fast import extract_fast_category
-from .analyzers.pro import pro_analyze
+from .analyzers.pro import pro_analyze, is_llm_error_reason, is_llm_timeout_reason
+
+
+@dataclass(frozen=True)
+class AdaptiveWindowSnapshot:
+    sample_count: int
+    timeout_rate: float
+    error_rate: float
+    p95_latency_s: float
+
+
+class AdaptiveWorkerController:
+    """Adaptive worker tuner using timeout/error rates and p95 latency signals."""
+
+    def __init__(
+        self,
+        initial_workers: int,
+        max_workers: int,
+        min_workers: int = 1,
+        backend: str = "ollama",
+        timeout_seconds: float = 60.0,
+        stable_windows_required: int = 2,
+    ) -> None:
+        safe_min = max(1, int(min_workers))
+        safe_max = max(safe_min, int(max_workers))
+        self.current_workers = max(safe_min, min(int(initial_workers), safe_max))
+        self.max_workers = safe_max
+        self.min_workers = safe_min
+        self.backend = "lm_studio" if str(backend).lower() == "lm_studio" else "ollama"
+        self.stable_windows_required = max(1, int(stable_windows_required))
+
+        p95_overload = max(8.0, min(float(timeout_seconds) * 0.60, 30.0))
+        if self.backend == "lm_studio":
+            p95_overload *= 1.15
+        self._p95_overload_s = p95_overload
+        self._p95_stable_s = max(3.0, p95_overload * 0.55)
+
+        self._stable_streak = 0
+        self.adjustment_events: list[str] = []
+
+        self._window_latencies: list[float] = []
+        self._window_timeout_count = 0
+        self._window_error_count = 0
+
+        self._all_latencies: list[float] = []
+        self._all_timeout_count = 0
+        self._all_error_count = 0
+        self._all_samples = 0
+
+    @staticmethod
+    def _compute_p95(values: list[float]) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(max(0.0, float(v)) for v in values)
+        index = max(0, min(len(ordered) - 1, math.ceil(0.95 * len(ordered)) - 1))
+        return ordered[index]
+
+    def _build_snapshot(self, latencies: list[float], timeout_count: int, error_count: int) -> AdaptiveWindowSnapshot:
+        sample_count = len(latencies)
+        if sample_count == 0:
+            return AdaptiveWindowSnapshot(sample_count=0, timeout_rate=0.0, error_rate=0.0, p95_latency_s=0.0)
+        return AdaptiveWindowSnapshot(
+            sample_count=sample_count,
+            timeout_rate=timeout_count / sample_count,
+            error_rate=error_count / sample_count,
+            p95_latency_s=self._compute_p95(latencies),
+        )
+
+    def observe(self, latency_s: float, reason: str) -> None:
+        latency = max(0.0, float(latency_s))
+        self._window_latencies.append(latency)
+        self._all_latencies.append(latency)
+        self._all_samples += 1
+
+        if is_llm_timeout_reason(reason):
+            self._window_timeout_count += 1
+            self._all_timeout_count += 1
+        elif is_llm_error_reason(reason):
+            self._window_error_count += 1
+            self._all_error_count += 1
+
+    def evaluate_window(self) -> tuple[int, str, AdaptiveWindowSnapshot]:
+        snapshot = self._build_snapshot(
+            self._window_latencies,
+            self._window_timeout_count,
+            self._window_error_count,
+        )
+
+        if snapshot.sample_count == 0:
+            return self.current_workers, "insufficient-data", snapshot
+
+        overloaded = (
+            snapshot.timeout_rate >= 0.10
+            or snapshot.error_rate >= 0.15
+            or snapshot.p95_latency_s >= self._p95_overload_s
+        )
+        stable = (
+            snapshot.timeout_rate == 0.0
+            and snapshot.error_rate <= 0.02
+            and snapshot.p95_latency_s <= self._p95_stable_s
+        )
+
+        previous_workers = self.current_workers
+        reason = "hold"
+
+        if overloaded:
+            decrease = max(1, previous_workers // 4)
+            self.current_workers = max(self.min_workers, previous_workers - decrease)
+            self._stable_streak = 0
+            reason = (
+                f"overload timeout-rate={snapshot.timeout_rate:.1%} "
+                f"error-rate={snapshot.error_rate:.1%} p95={snapshot.p95_latency_s:.1f}s"
+            )
+        elif stable:
+            self._stable_streak += 1
+            if self._stable_streak >= self.stable_windows_required and previous_workers < self.max_workers:
+                self.current_workers = min(self.max_workers, previous_workers + 1)
+                self._stable_streak = 0
+                reason = (
+                    f"stable timeout-rate={snapshot.timeout_rate:.1%} "
+                    f"error-rate={snapshot.error_rate:.1%} p95={snapshot.p95_latency_s:.1f}s"
+                )
+            else:
+                reason = (
+                    f"stable-hold timeout-rate={snapshot.timeout_rate:.1%} "
+                    f"error-rate={snapshot.error_rate:.1%} p95={snapshot.p95_latency_s:.1f}s"
+                )
+        else:
+            self._stable_streak = 0
+            reason = (
+                f"mixed timeout-rate={snapshot.timeout_rate:.1%} "
+                f"error-rate={snapshot.error_rate:.1%} p95={snapshot.p95_latency_s:.1f}s"
+            )
+
+        if self.current_workers != previous_workers:
+            self.adjustment_events.append(f"{previous_workers}->{self.current_workers} ({reason})")
+
+        self._window_latencies.clear()
+        self._window_timeout_count = 0
+        self._window_error_count = 0
+        return self.current_workers, reason, snapshot
+
+    def overall_snapshot(self) -> AdaptiveWindowSnapshot:
+        return self._build_snapshot(
+            self._all_latencies,
+            self._all_timeout_count,
+            self._all_error_count,
+        )
 
 
 class FetchProgressHandler:
