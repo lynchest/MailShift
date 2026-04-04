@@ -40,14 +40,19 @@ def init_db() -> None:
                 date TEXT,
                 size_bytes INTEGER,
                 body_preview TEXT,
-                has_attachment INTEGER
+                has_attachment INTEGER,
+                unsubscribe_url TEXT DEFAULT ''
             );
-            
+
             -- Checkpoint table: tracks which UIDs have been fully processed
             CREATE TABLE IF NOT EXISTS fetch_checkpoint (
                 uid TEXT PRIMARY KEY
             );
         ''')
+        # Migration: add unsubscribe_url column to existing DBs that predate this field
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(mails_cache)").fetchall()}
+        if "unsubscribe_url" not in existing:
+            conn.execute("ALTER TABLE mails_cache ADD COLUMN unsubscribe_url TEXT DEFAULT ''")
     _DB_INITIALIZED = True
 
 # ---------------------------------------------------------------------------
@@ -61,17 +66,17 @@ def save_mails_cache(mails: List[MailMeta], batch_size: int = 500) -> None:
         
     init_db()
     rows = [
-        (m.uid, m.subject, m.sender, m.date, m.size_bytes, m.body_preview, 1 if m.has_attachment else 0)
+        (m.uid, m.subject, m.sender, m.date, m.size_bytes, m.body_preview, 1 if m.has_attachment else 0, m.unsubscribe_url)
         for m in mails
     ]
-    
+
     with get_db_connection() as conn:
         for i in range(0, len(rows), batch_size):
             conn.executemany(
                 '''
                 INSERT OR REPLACE INTO mails_cache
-                (uid, subject, sender, date, size_bytes, body_preview, has_attachment)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (uid, subject, sender, date, size_bytes, body_preview, has_attachment, unsubscribe_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
                 rows[i : i + batch_size],
             )
@@ -85,18 +90,19 @@ def load_mails_cache() -> Optional[List[MailMeta]]:
     try:
         with get_db_connection() as conn:
             cursor = conn.execute('''
-                SELECT uid, subject, sender, date, size_bytes, body_preview, has_attachment 
+                SELECT uid, subject, sender, date, size_bytes, body_preview, has_attachment, unsubscribe_url
                 FROM mails_cache
             ''')
             rows = cursor.fetchall()
-            
+
             if not rows:
                 return None
-                
+
             return [
                 MailMeta(
                     uid=r[0], subject=r[1], sender=r[2], date=r[3],
-                    size_bytes=r[4], body_preview=r[5], has_attachment=bool(r[6])
+                    size_bytes=r[4], body_preview=r[5], has_attachment=bool(r[6]),
+                    unsubscribe_url=r[7] or "",
                 ) for r in rows
             ]
     except sqlite3.Error:
@@ -119,17 +125,18 @@ def load_mails_cache_by_uids(uids: List[str], batch_size: int = 500) -> List[Mai
                 
                 cursor = conn.execute(
                     f"""
-                    SELECT uid, subject, sender, date, size_bytes, body_preview, has_attachment
+                    SELECT uid, subject, sender, date, size_bytes, body_preview, has_attachment, unsubscribe_url
                     FROM mails_cache
                     WHERE uid IN ({placeholders})
                     """,
                     chunk,
                 )
-                
+
                 for r in cursor.fetchall():
                     rows_by_uid[r[0]] = MailMeta(
                         uid=r[0], subject=r[1], sender=r[2], date=r[3],
-                        size_bytes=r[4], body_preview=r[5], has_attachment=bool(r[6])
+                        size_bytes=r[4], body_preview=r[5], has_attachment=bool(r[6]),
+                        unsubscribe_url=r[7] or "",
                     )
     except sqlite3.Error:
         return []

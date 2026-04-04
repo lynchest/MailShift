@@ -77,3 +77,36 @@ def test_google_move_to_trash_falls_back_when_hint_copy_returns_no() -> None:
     conn.uid.assert_any_call("copy", "777", '"[Gmail]/Trash"')
     conn.uid.assert_any_call("store", "777", "+FLAGS", r"(\Deleted)")
     conn.expunge.assert_called_once()
+
+
+def test_google_move_to_trash_refreshes_candidates_after_initial_list_failure() -> None:
+    engine = _make_gmail_engine()
+
+    conn = MagicMock()
+    conn.list.side_effect = [
+        ("NO", [b"failed"]),
+        ("OK", [b'(\\HasNoChildren \\Trash) "/" "[Gmail]/&AMc-w7Y-p Kutusu"']),
+    ]
+
+    def _uid_side_effect(command: str, _uid: str, *args):
+        if command == "copy":
+            folder = args[0]
+            if folder == '"[Gmail]/&AMc-w7Y-p Kutusu"':
+                return ("OK", [b"copied"])
+            return ("NO", [b"bad destination"])
+        if command == "store":
+            return ("OK", [b"flagged"])
+        raise AssertionError(f"Unexpected UID command: {command}")
+
+    conn.uid.side_effect = _uid_side_effect
+    conn.expunge.return_value = ("OK", [b"expunged"])
+    engine._conn = conn
+
+    moved = engine.move_to_trash(["900"], trash_folder="[Gmail]/Trash")
+
+    assert moved == ["900"]
+    assert conn.list.call_count >= 2
+    conn.uid.assert_any_call("copy", "900", '"[Gmail]/Trash"')
+    conn.uid.assert_any_call("copy", "900", '"[Gmail]/&AMc-w7Y-p Kutusu"')
+    conn.uid.assert_any_call("store", "900", "+FLAGS", r"(\Deleted)")
+    conn.expunge.assert_called_once()

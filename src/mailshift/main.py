@@ -96,6 +96,130 @@ from .ui.cli import (
 )
 
 
+def _prompt_unsubscribe(to_delete: list) -> None:
+    """
+    After a scan, offer the user three unsubscribe options for emails
+    that carry a List-Unsubscribe HTTP URL.
+
+    Option 1 – auto-unsubscribe from all detected subscriptions.
+    Option 2 – pick senders interactively from a numbered list.
+    Option 3 – export all links to a file for manual processing.
+    """
+    from .utils.unsubscribe import build_unsubscribe_entries, perform_unsubscribe, export_unsubscribe_links
+
+    entries = build_unsubscribe_entries(to_delete)
+    if not entries:
+        return
+
+    console.print(Panel(
+        f"[bold]{len(entries)}[/bold] abonelik bağlantısı tespit edildi.\n"
+        "[dim]Bu aboneliklerden ayrılmak ister misiniz?[/dim]",
+        title="[bold magenta]Abonelik İptali[/bold magenta]",
+        border_style="magenta",
+        box=box.ROUNDED,
+    ))
+    console.print(
+        "  [bold magenta][1][/bold magenta] Tümünden otomatik abonelik iptali\n"
+        "  [bold magenta][2][/bold magenta] Seçerek abonelik iptali\n"
+        "  [bold magenta][3][/bold magenta] Abonelik linklerini dosyaya aktar\n"
+        "  [bold magenta][4][/bold magenta] Atla\n"
+    )
+    choice = Prompt.ask("[bold]Seçiminiz[/bold]", choices=["1", "2", "3", "4"], default="4")
+
+    if choice == "1":
+        _do_unsubscribe_all(entries, perform_unsubscribe)
+    elif choice == "2":
+        _do_unsubscribe_select(entries, perform_unsubscribe)
+    elif choice == "3":
+        _do_export_unsubscribe(entries, export_unsubscribe_links)
+
+
+def _do_unsubscribe_all(entries, perform_fn) -> None:
+    """Send unsubscribe requests to all entries."""
+    ok, fail = 0, 0
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold magenta]Abonelik iptali gönderiliyor[/bold magenta]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("unsub", total=len(entries))
+        for entry in entries:
+            success, msg = perform_fn(entry.unsubscribe_url)
+            log.info(f"Unsubscribe {'OK' if success else 'FAIL'} [{msg}]: {entry.unsubscribe_url}")
+            if success:
+                ok += 1
+            else:
+                fail += 1
+            progress.advance(task)
+
+    result_lines = f"[bold green]✔ {ok} başarılı[/bold green]"
+    if fail:
+        result_lines += f"  [bold red]✘ {fail} başarısız[/bold red]"
+    console.print(Panel(result_lines, title="[bold magenta]Abonelik İptali Tamamlandı[/bold magenta]", border_style="magenta", box=box.ROUNDED))
+
+
+def _do_unsubscribe_select(entries, perform_fn) -> None:
+    """Show a numbered list; user enters comma-separated choices."""
+    from rich.table import Table as RichTable
+
+    tbl = RichTable(box=box.SIMPLE, show_header=True, padding=(0, 1))
+    tbl.add_column("#", style="dim", width=4)
+    tbl.add_column("Gönderici", style="cyan", max_width=40, no_wrap=True)
+    tbl.add_column("Mail", style="yellow", justify="right", width=6)
+    tbl.add_column("Unsubscribe URL", style="dim", max_width=50, no_wrap=True)
+    for idx, e in enumerate(entries, start=1):
+        tbl.add_row(str(idx), e.sender[:40], str(e.mail_count), e.unsubscribe_url[:50])
+    console.print(tbl)
+
+    raw = Prompt.ask(
+        "[bold]İptal etmek istediğiniz numaraları girin[/bold] [dim](örn: 1,3 veya hepsi için all)[/dim]"
+    ).strip()
+
+    if raw.lower() == "all":
+        selected = entries
+    else:
+        chosen: list = []
+        for part in raw.split(","):
+            part = part.strip()
+            if part.isdigit():
+                idx = int(part) - 1
+                if 0 <= idx < len(entries):
+                    chosen.append(entries[idx])
+        selected = chosen
+
+    if not selected:
+        console.print("[yellow]Hiçbir seçim yapılmadı.[/yellow]")
+        return
+
+    _do_unsubscribe_all(selected, perform_fn)
+
+
+def _do_export_unsubscribe(entries, export_fn) -> None:
+    """Prompt for output path and export unsubscribe links."""
+    from .utils.paths import get_path
+
+    default_path = str(get_path("logs") / "unsubscribe_links.json")
+    output_path = Prompt.ask(
+        "[bold]Kayıt yolu[/bold]",
+        default=default_path,
+    )
+    try:
+        export_fn(entries, output_path)
+        console.print(Panel(
+            f"[bold green]✔ {len(entries)} abonelik linki kaydedildi.[/bold green]\n"
+            f"[dim]{output_path}[/dim]",
+            title="[bold magenta]Dışa Aktarıldı[/bold magenta]",
+            border_style="magenta",
+            box=box.ROUNDED,
+        ))
+    except Exception as exc:
+        console.print(f"[bold red]Dışa aktarma başarısız:[/bold red] {exc}")
+
+
 def clean_text(text: Optional[str], max_len: int = 35) -> str:
     """Normalize progress labels to avoid wrapped/duplicated-looking bars on narrow terminals."""
     if not text:
@@ -532,6 +656,8 @@ def main(
         if export_file:
             export_scan_results(to_delete, export_file)
 
+        # Dry-run modundaysa önizleme logu kaydet ve bilgilendirme paneli göster,
+        # ardından silme menüsüne düş (return yok — kullanıcı devam edebilir).
         if cfg.dry_run:
             log_file = save_cleanup_log(
                 to_delete,
@@ -543,11 +669,10 @@ def main(
             )
             console.print(Panel(
                 f"[bold]{len(to_delete)}[/bold] mesaj silinebilir olarak işaretlendi.\n"
-                "[dim]Dry run modu | henüz hiçbir şey silinmedi.[/dim]\n"
+                "[dim]Dry run modu — silmek için aşağıdan seçin, atlamak için İptal.[/dim]\n"
                 f"[dim]Log kaydedildi: {log_file}[/dim]",
-                title="[bold yellow]Dry Run Tamamlandı[/bold yellow]", border_style="yellow", box=box.ROUNDED
+                title="[bold yellow]Dry Run Önizlemesi[/bold yellow]", border_style="yellow", box=box.ROUNDED
             ))
-            return
 
         console.print("\n  [bold cyan][1][/bold cyan] Kalıcı Sil  [dim](geri alınamaz)[/dim]\n  [bold cyan][2][/bold cyan] Çöp Kutusuna Gönder\n  [bold cyan][3][/bold cyan] İptal\n")
         choice = Prompt.ask(f"[bold]{len(to_delete)} mesaj için ne yapmak istersiniz?[/bold]", choices=["1", "2", "3"], default="3")
@@ -557,14 +682,14 @@ def main(
             trash_folder = {Provider.GMAIL: "[Gmail]/Trash", Provider.PROTON: "Trash"}.get(cfg.provider, "Trash")
             delete_uids = [r.mail.uid for r in to_delete]
             action_label = "Kalıcı Siliniyor" if choice == "1" else "Çöp Kutusuna Taşınıyor"
-            
+
             with Progress(
                 SpinnerColumn(), TextColumn(f"[bold red]{action_label}[/bold red]"),
                 BarColumn(), TaskProgressColumn(), TimeElapsedColumn(), console=console, transient=True
             ) as progress:
                 del_task = progress.add_task("action", total=len(delete_uids))
                 cb = lambda _uid: progress.advance(del_task)
-                
+
                 deleted = engine.delete_mails(delete_uids, progress_cb=cb) if choice == "1" else \
                           engine.move_to_trash(delete_uids, trash_folder, progress_cb=cb)
 
@@ -588,7 +713,9 @@ def main(
                     f"[bold green]✔ {len(deleted)} mesaj {'kalıcı olarak silindi' if choice == '1' else 'çöp kutusuna taşındı'}.[/bold green]\n"
                     f"[dim]Log kaydedildi: {log_file}[/dim]", title="[bold green]İşlem Tamamlandı[/bold green]", border_style="green", box=box.ROUNDED
                 ))
+            _prompt_unsubscribe(to_delete)
         else:
+            _prompt_unsubscribe(to_delete)
             console.print("[yellow]İşlem iptal edildi.[/yellow]")
 
     except KeyboardInterrupt:

@@ -33,10 +33,12 @@ MailShift is a privacy-first, AI-assisted Gmail/Proton/IMAP mail cleaner. Entry 
 6. `core/session.py` — `LLMWorker` (threaded) + Rich progress handlers
 7. `core/engine.py` — `delete_mails()` / `move_to_trash()`: chunk, flag `\Deleted`, expunge, retry on SSL/EOF
 8. `utils/history.py` — JSON logs under `logs/`, CSV/JSON export; `ui/styles.py` — Rich result tables
+9. **Unsubscribe flow** (`utils/unsubscribe.py`): after scan results are shown, `_prompt_unsubscribe()` in `main.py` collects all `SIL` results that carry a `List-Unsubscribe` HTTP URL, deduplicates by URL, and presents a 4-option menu (auto-all / select / export / skip). Triggered in both dry-run and live paths.
 
 **Key files**:
 - `blacklist.json` / `whitelist.json` — project root, compiled to regex at import time in `config.py`. `JUNK_PATTERN`/`WHITELIST_PATTERN` may be `None` if empty — always guard with `if pattern:` before `.search()`
 - `mailshift.db` — SQLite cache at CWD (not a fixed path); delete to force fresh scan
+- `utils/unsubscribe.py` — `UnsubscribeEntry`, `build_unsubscribe_entries()`, `perform_unsubscribe()`, `export_unsubscribe_links()`
 
 ## Critical Conventions
 
@@ -55,6 +57,9 @@ MailShift is a privacy-first, AI-assisted Gmail/Proton/IMAP mail cleaner. Entry 
 
 ## Gotchas
 
+- `MailMeta.unsubscribe_url` is populated from the `List-Unsubscribe` header during `_fetch_mails_bulk()` using `_UNSUB_URL_RE` (HTTP-only; `mailto:` entries are silently ignored). The second body-fetch pass only updates `body_preview`, so the URL from the first header fetch is preserved.
+- `database.py` auto-migrates old DBs: `init_db()` runs `ALTER TABLE mails_cache ADD COLUMN unsubscribe_url TEXT DEFAULT ''` if the column is absent.
+- `perform_unsubscribe()` tries GET first, then falls back to an RFC 8058 one-click POST (`List-Unsubscribe=One-Click`). Never import `requests` for this — use stdlib `urllib.request` only.
 - `fetch_headers_concurrent` is sequential at the IMAP level (single connection). Do not add per-thread IMAP connections without careful locking.
 - Runtime mutations via `add_to_blacklist()` / `add_to_whitelist()` update JSON but **do not update the in-memory regex** — a process restart is needed.
 - `list_uids()` reverses UIDs (`[::-1]`) so newest-first; `scan_limit` skips oldest emails.

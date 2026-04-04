@@ -33,6 +33,7 @@ SMALL_MAIL_THRESHOLD_BYTES = 25 * 1024
 
 _UID_RE = re.compile(r"UID\s+(\d+)", re.IGNORECASE)
 _SIZE_RE = re.compile(r"RFC822\.SIZE\s+(\d+)", re.IGNORECASE)
+_UNSUB_URL_RE = re.compile(r"<(https?://[^>]+)>", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +66,15 @@ def _decode_header_value(raw: str | bytes | None) -> str:
         p.decode(c or "utf-8", errors="replace") if isinstance(p, bytes) else str(p)
         for p, c in email.header.decode_header(raw)
     )
+
+
+def _extract_unsubscribe_url(msg: Message) -> str:
+    """Extract the first HTTP(S) URL from the List-Unsubscribe header."""
+    raw = msg.get("List-Unsubscribe", "")
+    if not raw:
+        return ""
+    match = _UNSUB_URL_RE.search(raw)
+    return match.group(1) if match else ""
 
 
 def _has_attachment(msg: Message) -> bool:
@@ -193,6 +203,7 @@ def _fetch_mails_bulk(
                             else ""
                         ),
                         has_attachment=_has_attachment(msg),
+                        unsubscribe_url=_extract_unsubscribe_url(msg),
                     )
                 )
         except Exception:
@@ -635,32 +646,54 @@ class MailEngine:
         return deleted
 
     def _resolve_trash_folders(self, hint: str) -> list[str]:
+        assert self._conn, "Not connected"
         candidates: list[str] = []
         if hint:
             candidates.append(hint.strip('"'))
 
-        try:
-            status, lines = self._conn.list('""', "*")
-            if status == "OK":
-                for line in lines:
-                    if not line:
-                        continue
-                    text = line.decode() if isinstance(line, bytes) else line
-                    m = re.search(r'"([^"]+)"\s*$|(\S+)\s*$', text)
-                    if not m:
-                        continue
-                    name = (m.group(1) or m.group(2)).strip('"')
-                    lower_text = text.lower()
-                    has_trash_flag = r"\trash" in lower_text
-                    keywords = ("trash", "bin", "deleted", "çöp", "silinmiş", "papelera", "corbeille", "papierkorb")
-                    lower_name = name.lower()
-                    has_keyword = any(k in lower_name for k in keywords)
-                    if has_trash_flag or has_keyword:
-                        candidates.append(name)
-            else:
-                log.warning(f"Trash folder LIST returned status={status}")
-        except Exception as e:
-            log.warning(f"Trash folder discovery failed: {e}")
+        lines: list | None = None
+        for attempt in range(1, self._rl.max_retries + 1):
+            try:
+                status, listed_lines = self._conn.list('""', "*")
+                if status == "OK":
+                    lines = listed_lines
+                else:
+                    log.warning(f"Trash folder LIST returned status={status}")
+                break
+            except Exception as e:
+                if self._is_connection_error(e) and attempt < self._rl.max_retries:
+                    self._force_reconnect("trash folder discovery", attempt)
+                    continue
+                log.warning(f"Trash folder discovery failed: {e}")
+                break
+
+        if lines:
+            for line in lines:
+                if not line:
+                    continue
+                text = (
+                    line.decode(errors="replace") if isinstance(line, bytes) else str(line)
+                )
+                m = re.search(r'"([^"]+)"\s*$|(\S+)\s*$', text)
+                if not m:
+                    continue
+                name = (m.group(1) or m.group(2)).strip('"')
+                lower_text = text.lower()
+                has_trash_flag = r"\trash" in lower_text
+                keywords = (
+                    "trash",
+                    "bin",
+                    "deleted",
+                    "çöp",
+                    "silinmiş",
+                    "papelera",
+                    "corbeille",
+                    "papierkorb",
+                )
+                lower_name = name.lower()
+                has_keyword = any(k in lower_name for k in keywords)
+                if has_trash_flag or has_keyword:
+                    candidates.append(name)
 
         if self.cfg.provider == Provider.GMAIL:
             candidates.extend([
@@ -709,17 +742,27 @@ class MailEngine:
 
         for chunk_idx, chunk in enumerate(chunks, start=1):
             uid_str = ",".join(chunk)
+            chunk_folders = list(folders)
 
             # --- HATA DÜZELTİLDİ: Copy ve Store işlemleri ayrıldı ---
             def _copy(u=uid_str):
                 last_status = "NO"
-                for folder in folders:
+                for folder in chunk_folders:
                     status, _ = self._conn.uid("copy", u, f'"{folder}"')
                     if status == "OK":
                         return  # Başarılı kopyalama, Store işi diğer adıma bırakıldı.
                     last_status = status
                     log.debug(f"COPY returned {status} for trash folder '{folder}', trying next candidate")
                 raise RuntimeError(f"COPY returned {last_status}")
+
+            def _on_copy_error(exc: Exception, attempt: int, lbl: str) -> None:
+                nonlocal folders, chunk_folders
+                self._recover_connection(exc, lbl, attempt)
+                refreshed_folders = self._resolve_trash_folders(trash_folder)
+                if refreshed_folders != folders:
+                    log.info(f"Refreshed trash folder candidates: {refreshed_folders}")
+                folders = refreshed_folders
+                chunk_folders = list(refreshed_folders)
 
             def _store_deleted(u=uid_str):
                 store_status, _ = self._conn.uid("store", u, "+FLAGS", r"(\Deleted)")
@@ -732,7 +775,7 @@ class MailEngine:
                     _copy, rl, label=f"trash chunk copy {chunk_idx}/{total_chunks}",
                     on_error=lambda exc, attempt, lbl=(
                         f"trash chunk copy {chunk_idx}/{total_chunks}"
-                    ): self._force_reconnect(lbl, attempt),
+                    ): _on_copy_error(exc, attempt, lbl),
                 )
                 
                 # 2. Aşama: Etiketleme (Eğer koparsa kopyalama baştan yapılmaz, sadece bu denenir)
@@ -740,7 +783,7 @@ class MailEngine:
                     _store_deleted, rl, label=f"trash chunk store {chunk_idx}/{total_chunks}",
                     on_error=lambda exc, attempt, lbl=(
                         f"trash chunk store {chunk_idx}/{total_chunks}"
-                    ): self._force_reconnect(lbl, attempt),
+                    ): self._recover_connection(exc, lbl, attempt),
                 )
                 
                 moved.extend(chunk)

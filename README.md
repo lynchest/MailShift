@@ -36,6 +36,7 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 - **Dry-run default** – preview before any deletion
 - **Dry-run history logs**: Dry-run candidate results are also saved under `logs/cleanup_log_*.json` for later review
 - **OS Keyring** (Windows Credential Manager) — stores provider-based credentials securely via the `keyring` library for the interactive "reuse previous credentials" prompt. No longer stored in plain-text JSON files.
+- **Unsubscribe suggestions**: After a scan, MailShift detects `List-Unsubscribe` headers and offers three options — auto-unsubscribe from all detected senders, pick individual senders from a numbered list, or export all unsubscribe links to a JSON/TXT file for manual processing. Available in both dry-run and live modes.
 - **Delete options**: Permanent delete or move to Trash
 - **Resilient IMAP deletion**: Delete/trash chunks and expunge retry with exponential back-off and automatic IMAP reconnect on SSL/EOF disconnects
 - **Concurrent fetching** – multi-threaded IMAP operations
@@ -172,7 +173,11 @@ python main.py --list-keywords
      - Phase 1: heuristic scan to find suspicious messages
      - Phase 2: run matched mail through Ollama LLM for verification
 4. **Review** – table of messages marked for deletion
-5. **Delete** – permanent delete or move to Trash (empty Trash to permanent delete)
+5. **Unsubscribe** *(optional)* – after review, MailShift checks for `List-Unsubscribe` HTTP URLs and offers:
+   - Auto-unsubscribe from all detected senders at once
+   - Select individual senders from a numbered list
+   - Export all links to `logs/unsubscribe_links.json` (or a custom path) for manual processing
+6. **Delete** – permanent delete or move to Trash (empty Trash to permanent delete)
     - Delete/trash operations automatically retry transient IMAP/SSL socket failures and reconnect before retrying
 
 ## Files

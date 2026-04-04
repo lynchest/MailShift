@@ -16,6 +16,7 @@ class MailMeta:
     size_bytes: int = 0
     body_preview: str = ""
     has_attachment: bool = False
+    unsubscribe_url: str = ""
 
 
 @dataclass
