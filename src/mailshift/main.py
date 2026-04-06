@@ -87,6 +87,7 @@ from .ui.styles import (
     build_stats_panel,
     clear_console,
 )
+from .utils.updater import check_and_prompt_update
 from .utils.history import save_cleanup_log, export_scan_results, print_history
 from .utils.logger import log
 from .ui.cli import (
@@ -429,6 +430,8 @@ def main(
         return
     if uninstall:
         return handle_uninstall()
+
+    check_and_prompt_update(console)
 
     # Resolution & Setup
     resolved_provider = Provider(provider) if provider else prompt_provider()
