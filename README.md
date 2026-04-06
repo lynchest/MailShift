@@ -55,37 +55,71 @@ Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
 - **Logging** – detailed operation logs
     - Console warnings/errors are written to stderr to reduce interference with live progress rendering
 
-## Install
+## Quick Start (Recommended)
+
+MailShift is now available on PyPI.
 
 ```bash
+# Install from PyPI
+pip install mailshift
+
+# Start interactive mode
+mailshift
+```
+
+That's it. Most users only need these two commands.
+
+## Install
+
+### Option A: PyPI (recommended)
+
+```bash
+# Install
+pip install mailshift
+
+# Upgrade
+pip install --upgrade mailshift
+
+# Optional: NVIDIA extra for improved Pro-mode worker sizing
+pip install "mailshift[nvidia]"
+```
+
+### Option B: Source install (development)
+
+```bash
+git clone https://github.com/lynchest/MailShift.git
+cd MailShift
 pip install -r requirements.txt
+python main.py
 ```
 
 ## Usage
 
+Use the `mailshift` command if installed via `pip install mailshift`.
+
 ```bash
 # Interactive mode
-python main.py
+mailshift
 
 # Non-interactive
-python main.py --provider gmail --mode fast \
+mailshift --provider gmail --mode fast \
     --username you@gmail.com --password "app-password"
 
 # Custom IMAP server
-python main.py --provider custom --mode fast \
+mailshift --provider custom --mode fast \
     --username you@example.com --password "your-password" \
     --host imap.example.com --port 993
 
 # Pro mode with LLM (two-phase analysis)
-python main.py --provider gmail --mode pro \
+mailshift --provider gmail --mode pro \
     --username you@gmail.com --password "app-password"
 
 # Real deletion (disable dry-run)
-python main.py --provider gmail --mode pro \
+mailshift --provider gmail --mode pro \
     --username you@gmail.com --password "app-password" --no-dry-run
 
 # Scan only a date window (IMAP SINCE/BEFORE)
-python main.py --provider gmail --mode fast \
+mailshift --provider gmail --mode fast \
     --username you@gmail.com --password "app-password" \
     --since 2025-01-01 --before 2026-01-01
 
@@ -93,29 +127,31 @@ python main.py --provider gmail --mode fast \
 # (select option 2 when prompted)
 
 # View cleanup history
-python main.py --history
+mailshift --history
 
 # Export scan results to CSV (before deletion)
-python main.py --provider gmail --mode fast \
+mailshift --provider gmail --mode fast \
     --username you@gmail.com --password "app-password" \
     --export results.csv
 
 # Export to JSON
-python main.py --provider gmail --mode fast \
+mailshift --provider gmail --mode fast \
     --username you@gmail.com --password "app-password" \
     --export results.json
 
 # Custom Ollama settings
-python main.py --provider gmail --mode pro \
+mailshift --provider gmail --mode pro \
     --username you@gmail.com --password "app-password" \
     --ollama-url http://localhost:11434 \
     --ollama-model qwen3.5:2B
 
 # Custom system prompt for LLM
-python main.py --provider gmail --mode pro \
+mailshift --provider gmail --mode pro \
     --username you@gmail.com --password "app-password" \
     --ollama-prompt "Custom prompt here"
 ```
+
+If you run from source, replace `mailshift` with `python main.py`.
 
 ## Options
 
@@ -154,19 +190,19 @@ Manage whitelist and blacklist keywords directly from CLI:
 
 ```bash
 # Add a keyword to whitelist
-python main.py --add-whitelist "fatura"
+mailshift --add-whitelist "fatura"
 
 # Remove a keyword from whitelist
-python main.py --remove-whitelist "fatura"
+mailshift --remove-whitelist "fatura"
 
 # Add a keyword to blacklist
-python main.py --add-blacklist "spam"
+mailshift --add-blacklist "spam"
 
 # Remove a keyword from blacklist
-python main.py --remove-blacklist "spam"
+mailshift --remove-blacklist "spam"
 
 # List all keywords
-python main.py --list-keywords
+mailshift --list-keywords
 ```
 
 ## How It Works

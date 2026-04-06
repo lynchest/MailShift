@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mailshift"
+version = "1.0.1"
+description = "Privacy-first newsletter & junk mail cleaner for Gmail, Proton Mail and IMAP"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["email", "gmail", "imap", "cli", "llm", "cleanup", "newsletter", "spam"]
+classifiers = [
+    "Environment :: Console",
+    "Topic :: Communications :: Email",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "click>=8.3.1",
+    "keyring>=25.7.0",
+    "pydantic>=2.12.5",
+    "psutil>=7.2.2",
+    "requests>=2.32.5",
+    "rich>=14.3.3",
+    "lxml>=6.0.2",
+]
+
+[project.optional-dependencies]
+nvidia = [
+    "nvidia-ml-py>=13.595.45",
+]
+
+[project.scripts]
+mailshift = "mailshift.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mailshift"]

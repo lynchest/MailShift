@@ -4,15 +4,18 @@ main.py – MailShift CLI entry point.
 Usage examples
 --------------
 # Interactive (prompts for provider, mode, credentials):
-    python main.py
+    mailshift
 
 # Non-interactive with all flags:
-    python main.py --provider gmail --mode fast --username you@gmail.com \
+    mailshift --provider gmail --mode fast --username you@gmail.com \
         --password "app-password" --dry-run
 
 # Actually delete (no dry-run):
-    python main.py --provider gmail --mode pro --username you@gmail.com \
+    mailshift --provider gmail --mode pro --username you@gmail.com \
         --password "app-password" --no-dry-run
+
+# Running from source checkout:
+    python main.py
 """
 
 from __future__ import annotations
