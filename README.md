@@ -61,7 +61,7 @@ MailShift is now available on PyPI.
 
 ```bash
 # Install from PyPI
-pip install mailshift
+pipx install mailshift
 
 # Start interactive mode
 mailshift
@@ -75,13 +75,13 @@ That's it. Most users only need these two commands.
 
 ```bash
 # Install
-pip install mailshift
+pipx install mailshift
 
 # Upgrade
-pip install --upgrade mailshift
+pipx upgrade mailshift
 
 # Optional: NVIDIA extra for improved Pro-mode worker sizing
-pip install "mailshift[nvidia]"
+pipx install "mailshift[nvidia]"
 ```
 
 ### Option B: Source install (development)
@@ -95,7 +95,7 @@ python main.py
 
 ## Usage
 
-Use the `mailshift` command if installed via `pip install mailshift`.
+Use the `mailshift` command if installed via `pipx install mailshift`.
 
 ```bash
 # Interactive mode
