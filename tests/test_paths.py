@@ -20,7 +20,7 @@ def test_root_dir_correctness():
 def test_get_path_with_filename():
     """Verify get_path works correctly with a simple filename."""
     relative_path = "test_file.txt"
-    expected_path = ROOT_DIR / relative_path
+    expected_path = (ROOT_DIR / relative_path).resolve()
 
     result = get_path(relative_path)
 
@@ -32,7 +32,11 @@ def test_get_path_with_filename():
 def test_get_path_with_directory_and_filename():
     """Verify get_path works correctly with a path containing directories."""
     relative_path = "some/nested/dir/file.json"
-    expected_path = ROOT_DIR / "some" / "nested" / "dir" / "file.json"
+    expected_path = (ROOT_DIR / "some" / "nested" / "dir" / "file.json").resolve()
+
+    # Note: .resolve() might fail if directories don't exist on some systems,
+    # but for testing purposes we just need to ensure the logic matches.
+    # Actually, resolve() on non-existent paths just resolves the parts that exist.
 
     result = get_path(relative_path)
 
@@ -52,3 +56,15 @@ def test_get_path_preserves_path_separators():
     result = get_path(relative_path)
     assert result.name == "dir2"
     assert result.parent.name == "dir1"
+
+
+def test_get_path_traversal_protection():
+    """Verify that get_path raises ValueError for traversal attempts."""
+    with pytest.raises(ValueError, match="Path traversal attempt detected"):
+        get_path("../../etc/passwd")
+
+    with pytest.raises(ValueError, match="Path traversal attempt detected"):
+        get_path("/etc/passwd")
+
+    with pytest.raises(ValueError, match="Path traversal attempt detected"):
+        get_path("..")
