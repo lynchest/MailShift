@@ -24,8 +24,7 @@ def test_fetch_progress_handler_batches_updates() -> None:
 
     # start_time and now_fn are deterministic for stable assertions
     ticks = iter([11.0, 12.0, 13.0])
-    handler = session_helpers.FetchProgressHandler(
-        mails=mails,
+    params = session_helpers.FetchProgressParams(
         progress=progress,
         task_id=1,
         total_count=3,
@@ -34,6 +33,10 @@ def test_fetch_progress_handler_batches_updates() -> None:
         batch_size=2,
         start_time=10.0,
         now_fn=lambda: next(ticks),
+    )
+    handler = session_helpers.FetchProgressHandler(
+        mails=mails,
+        params=params,
     )
 
     handler(MailMeta(uid="1", sender="alice"))
@@ -56,13 +59,16 @@ def test_analyze_progress_handler_batches_updates() -> None:
     scan_results: list[ScanResult] = []
     progress = ProgressSpy()
 
-    handler = session_helpers.AnalyzeProgressHandler(
-        scan_results=scan_results,
+    params = session_helpers.AnalyzeProgressParams(
         progress=progress,
         task_id=9,
         total_count=3,
         clean_text_fn=lambda text, _max_len: (text or "(none)"),
         batch_size=2,
+    )
+    handler = session_helpers.AnalyzeProgressHandler(
+        scan_results=scan_results,
+        params=params,
     )
 
     handler(ScanResult(mail=MailMeta(uid="1", subject="msg-1"), decision="TUT"))

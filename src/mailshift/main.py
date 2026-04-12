@@ -75,7 +75,14 @@ from .utils.power_user_settings import (
     set_worker_probe_preference,
 )
 from .core.engine import MailEngine, MailMeta, ScanResult, ScanStats
-from .core.session import AnalyzeProgressHandler, FetchProgressHandler, LLMWorker, AdaptiveWorkerController
+from .core.session import (
+    AnalyzeProgressHandler,
+    AnalyzeProgressParams,
+    FetchProgressHandler,
+    FetchProgressParams,
+    LLMWorker,
+    AdaptiveWorkerController,
+)
 from .db.database import save_mails_cache, load_mails_cache_by_uids
 from .core.analyzers.pro import (
     check_ollama_health,
@@ -602,14 +609,14 @@ def main(
                 TimeElapsedColumn(), console=console, transient=True
             ) as progress:
                 task = progress.add_task("fetch", total=len(missing_uids), current="Starting…")
-                fetch_handler = FetchProgressHandler(
-                    mails=mails,
+                fetch_params = FetchProgressParams(
                     progress=progress,
                     task_id=task,
                     total_count=len(missing_uids),
                     clean_text_fn=clean_text,
                     format_duration_fn=format_duration,
                 )
+                fetch_handler = FetchProgressHandler(mails=mails, params=fetch_params)
                 engine.fetch_headers_concurrent(missing_uids, progress_cb=fetch_handler)
             console.print("[green]Yeni başlıklar eklendi.[/green]")
 
@@ -787,12 +794,14 @@ def main(
                 TimeElapsedColumn(), console=console, transient=True
             ) as progress:
                 task = progress.add_task("analyze", total=len(mails), current="Starting…")
-                analyze_handler = AnalyzeProgressHandler(
-                    scan_results=scan_results,
+                analyze_params = AnalyzeProgressParams(
                     progress=progress,
                     task_id=task,
                     total_count=len(mails),
                     clean_text_fn=clean_text,
+                )
+                analyze_handler = AnalyzeProgressHandler(
+                    scan_results=scan_results, params=analyze_params
                 )
                 _, raw_stats = engine.analyze(mails, progress_cb=analyze_handler)
 
