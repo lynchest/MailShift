@@ -24,6 +24,29 @@ class AdaptiveWindowSnapshot:
     p95_latency_s: float
 
 
+@dataclass
+class FetchProgressParams:
+    """Parameters for FetchProgressHandler."""
+    progress: object
+    task_id: int
+    total_count: int
+    clean_text_fn: Callable[[Optional[str], int], str]
+    format_duration_fn: Callable[[float], str]
+    batch_size: int = 10
+    now_fn: Callable[[], float] = time.perf_counter
+    start_time: Optional[float] = None
+
+
+@dataclass
+class AnalyzeProgressParams:
+    """Parameters for AnalyzeProgressHandler."""
+    progress: object
+    task_id: int
+    total_count: int
+    clean_text_fn: Callable[[Optional[str], int], str]
+    batch_size: int = 20
+
+
 class AdaptiveWorkerController:
     """Adaptive worker tuner using timeout/error rates and p95 latency signals."""
 
@@ -169,24 +192,19 @@ class FetchProgressHandler:
     def __init__(
         self,
         mails: list[MailMeta],
-        progress: object,
-        task_id: int,
-        total_count: int,
-        clean_text_fn: Callable[[Optional[str], int], str],
-        format_duration_fn: Callable[[float], str],
-        batch_size: int = 10,
-        now_fn: Callable[[], float] = time.perf_counter,
-        start_time: Optional[float] = None,
+        params: FetchProgressParams,
     ) -> None:
         self._mails = mails
-        self._progress = progress
-        self._task_id = task_id
-        self._total_count = total_count
-        self._clean_text = clean_text_fn
-        self._format_duration = format_duration_fn
-        self._batch_size = max(1, batch_size)
-        self._now_fn = now_fn
-        self._start_time = now_fn() if start_time is None else start_time
+        self._progress = params.progress
+        self._task_id = params.task_id
+        self._total_count = params.total_count
+        self._clean_text = params.clean_text_fn
+        self._format_duration = params.format_duration_fn
+        self._batch_size = max(1, params.batch_size)
+        self._now_fn = params.now_fn
+        self._start_time = (
+            params.now_fn() if params.start_time is None else params.start_time
+        )
 
         self._done = 0
         self._pending = 0
@@ -215,18 +233,14 @@ class AnalyzeProgressHandler:
     def __init__(
         self,
         scan_results: list[ScanResult],
-        progress: object,
-        task_id: int,
-        total_count: int,
-        clean_text_fn: Callable[[Optional[str], int], str],
-        batch_size: int = 20,
+        params: AnalyzeProgressParams,
     ) -> None:
         self._scan_results = scan_results
-        self._progress = progress
-        self._task_id = task_id
-        self._total_count = total_count
-        self._clean_text = clean_text_fn
-        self._batch_size = max(1, batch_size)
+        self._progress = params.progress
+        self._task_id = params.task_id
+        self._total_count = params.total_count
+        self._clean_text = params.clean_text_fn
+        self._batch_size = max(1, params.batch_size)
 
         self._done = 0
         self._pending = 0
