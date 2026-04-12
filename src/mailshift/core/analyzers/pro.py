@@ -42,6 +42,11 @@ REASON_PATTERNS = [
     re.compile(r'this is\s+(a\s+\w+)\s+', re.IGNORECASE),
 ]
 
+# ── Compiled patterns for decision parsing ──────────────────────────────
+SIL_PATTERN = re.compile(r"\bsil\b", flags=re.IGNORECASE)
+TUT_PATTERN = re.compile(r"\btut\b", flags=re.IGNORECASE)
+DECISION_PATTERN = re.compile(r"\b(sil|tut)\b", flags=re.IGNORECASE)
+
 
 def is_llm_timeout_reason(reason: str) -> bool:
     """Return True when a result reason indicates timeout-like LLM failure."""
@@ -83,7 +88,7 @@ def _select_ollama_runtime_options(model_name: str) -> dict[str, Union[int, floa
     try:
         system_info = get_system_info()
         model_size_b = detect_model_size(model_name)
-        
+
         cpu_threads = max(2, min(12, max(1, system_info.cpu_count - 1)))
         options["num_thread"] = cpu_threads
 
@@ -106,7 +111,7 @@ def _select_ollama_runtime_options(model_name: str) -> dict[str, Union[int, floa
         else:
             options["num_gpu"] = 0
             options["use_flash_attn"] = False
-            
+
     except Exception as exc:
         log.warning(f"Hardware-based Ollama tuning failed, defaults will be used: {exc}")
 
@@ -134,7 +139,7 @@ def _get_session() -> requests.Session:
                 _session = requests.Session()
                 # Configured Retry to include POST methods explicitly
                 retry_strategy = Retry(
-                    total=2, 
+                    total=2,
                     backoff_factor=0.3,
                     status_forcelist=[429, 500, 502, 503, 504],
                     allowed_methods=["GET", "POST"]
@@ -306,7 +311,7 @@ class LLMProvider(ABC):
         decision = self._extract_decision_from_json(response)
         if decision is None:
             normalized = self._normalize_for_decision_parse(response)
-            matches = list(re.finditer(r"\b(sil|tut)\b", normalized, flags=re.IGNORECASE))
+            matches = list(DECISION_PATTERN.finditer(normalized))
             if not matches:
                 return ("TUT", "invalid-response")
             decision = "SIL" if matches[0].group(1).lower() == "sil" else "TUT"
@@ -330,7 +335,7 @@ class LLMProvider(ABC):
             values_to_check: list[str] = []
             if isinstance(parsed, dict):
                 values_to_check.extend(
-                    str(v) for k, v in parsed.items() 
+                    str(v) for k, v in parsed.items()
                     if k in {"decision", "karar", "label", "result"} and isinstance(v, str)
                 )
             elif isinstance(parsed, str):
@@ -338,9 +343,9 @@ class LLMProvider(ABC):
 
             for value in values_to_check:
                 normalized = self._normalize_for_decision_parse(value)
-                if re.search(r"\bsil\b", normalized, flags=re.IGNORECASE):
+                if SIL_PATTERN.search(normalized):
                     return "SIL"
-                if re.search(r"\btut\b", normalized, flags=re.IGNORECASE):
+                if TUT_PATTERN.search(normalized):
                     return "TUT"
         return None
 
@@ -426,7 +431,7 @@ class OllamaProvider(LLMProvider):
                 "num_predict": self._resolve_num_predict(),
             }
         }
-        
+
         # Requests Session allows max_retries natively, but we keep explicit timeout catching for logging.
         try:
             resp = _get_session().post(
@@ -483,7 +488,7 @@ class LMStudioProvider(LLMProvider):
                 timeout=self.cfg.timeout,
             )
             resp.raise_for_status()
-            
+
             choices = resp.json().get("choices", [])
             raw_response = ""
             if choices and isinstance(choices[0], dict):
@@ -511,16 +516,16 @@ def pro_analyze(
 ) -> ScanResult:
     """Analyze a single email via thread-safe cached LLM provider."""
     cache_key = f"{backend}|{cfg.base_url}|{cfg.model}"
-    
+
     with _provider_cache_lock:
         if cache_key not in _provider_cache:
             if backend == "lm_studio":
                 _provider_cache[cache_key] = LMStudioProvider(cfg)
             else:
                 _provider_cache[cache_key] = OllamaProvider(cfg)
-                
+
     provider = _provider_cache[cache_key]
-    
+
     return provider.analyze(
         meta,
         fast_reason=fast_reason,
