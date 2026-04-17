@@ -12,6 +12,8 @@ from mailshift.utils.unsubscribe import (
     UnsubscribeEntry,
     build_unsubscribe_entries,
     export_unsubscribe_links,
+    is_safe_url,
+    perform_unsubscribe,
 )
 from mailshift.models.models import MailMeta, ScanResult
 
@@ -89,10 +91,58 @@ def test_export_unsubscribe_links_txt(tmp_path):
     assert "http://url1" in content
 
 
+def test_is_safe_url():
+    """Verify SSRF protection logic."""
+    # Safe URLs
+    assert is_safe_url("http://example.com/unsubscribe") is True
+    assert is_safe_url("https://google.com") is True
+
+    # Unsafe schemes
+    assert is_safe_url("ftp://example.com") is False
+    assert is_safe_url("file:///etc/passwd") is False
+    assert is_safe_url("gopher://example.com") is False
+
+    # Private/Local IPs
+    assert is_safe_url("http://127.0.0.1/unsubscribe") is False
+    assert is_safe_url("http://localhost/unsubscribe") is False
+    assert is_safe_url("http://192.168.1.1/unsubscribe") is False
+    assert is_safe_url("http://10.0.0.1/unsubscribe") is False
+    assert is_safe_url("http://172.16.0.1/unsubscribe") is False
+    assert is_safe_url("http://[::1]/unsubscribe") is False
+
+
+def test_perform_unsubscribe_blocked():
+    """Verify that perform_unsubscribe blocks unsafe URLs."""
+    success, message = perform_unsubscribe("http://127.0.0.1/unsubscribe")
+    assert success is False
+    assert "blocked" in message.lower()
+
+
+def test_perform_unsubscribe_redirect_blocked(mocker):
+    """Verify that perform_unsubscribe blocks unsafe redirects."""
+    if mocker is None:
+        pytest.skip("mocker fixture not available")
+
+    # Mock opener.open to simulate a redirect that fails safety check
+    # In reality, SafeRedirectHandler would raise the error
+    # Here we can just verify it uses our is_safe_url
+
+    import urllib.request
+    from mailshift.utils.unsubscribe import SafeRedirectHandler
+
+    handler = SafeRedirectHandler()
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        handler.redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/malicious")
+    assert excinfo.value.code == 403
+    assert "unsafe URL" in excinfo.value.reason
+
+
 if __name__ == "__main__":
     # Manual execution for environments without pytest
     print("Running tests standalone...")
     test_build_unsubscribe_entries()
+    test_is_safe_url()
+    test_perform_unsubscribe_blocked()
 
     tmp_dir = tempfile.mkdtemp()
     try:
