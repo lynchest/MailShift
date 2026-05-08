@@ -400,9 +400,6 @@ class MailEngine:
                 if progress_cb:
                     progress_cb(meta)
 
-            if chunk_results:
-                mark_uids_fetched([m.uid for m in chunk_results])
-                save_mails_cache(chunk_results, batch_size=rl.db_batch_size)
 
             if had_retry:
                 base = max(chunk_delay, rl.chunk_delay)
@@ -412,6 +409,10 @@ class MailEngine:
 
             if chunk_idx < total_chunks and chunk_delay > 0:
                 time.sleep(chunk_delay)
+
+        if results:
+            mark_uids_fetched([m.uid for m in results])
+            save_mails_cache(results, batch_size=rl.db_batch_size)
 
         log.info(f"Successfully fetched {len(results)} message headers")
         return results
