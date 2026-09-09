@@ -1,5 +1,5 @@
 """
-updater.py – GitHub üzerinden otomatik güncelleme kontrolü.
+updater.py – GitHub ve PyPI üzerinden otomatik güncelleme kontrolü.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 
 _GITHUB_API_URL = "https://api.github.com/repos/lynchest/MailShift/commits/main"
+_PYPI_API_URL = "https://pypi.org/pypi/mailshift/json"
 _TIMEOUT = 5
 
 
@@ -46,6 +47,45 @@ def _get_remote_commit() -> str | None:
     return None
 
 
+def _get_installed_version() -> str | None:
+    try:
+        from importlib.metadata import version
+        return version("mailshift")
+    except Exception:
+        pass
+    return None
+
+
+def _get_pypi_version() -> str | None:
+    try:
+        req = urllib.request.Request(
+            _PYPI_API_URL,
+            headers={"User-Agent": "MailShift-Updater"},
+        )
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode())
+            return data.get("info", {}).get("version")
+    except Exception:
+        pass
+    return None
+
+
+def _parse_version(v: str) -> tuple[int, ...]:
+    parts = []
+    for p in v.split("."):
+        clean = ""
+        for ch in p:
+            if ch.isdigit():
+                clean += ch
+            else:
+                break
+        if clean:
+            parts.append(int(clean))
+        else:
+            parts.append(0)
+    return tuple(parts)
+
+
 def _is_working_tree_dirty() -> bool:
     """Uncommitted değişiklik veya push edilmemiş commit varsa True döner."""
     try:
@@ -66,71 +106,93 @@ def _is_working_tree_dirty() -> bool:
 
 
 def check_and_prompt_update(console) -> None:
-    """Uygulama açılışında GitHub'daki en yeni commit ile yerel commit'i karşılaştırır.
-    Fark varsa kullanıcıya sorar; onaylanırsa git pull çalıştırır ve çıkar."""
+    """Uygulama açılışında güncelleme kontrolü yapar:
+    1. Git clone ile çalışıyorsa: GitHub'daki son commit ile yerel commit'i karşılaştırır, fark varsa git pull önerir.
+    2. pipx / pip paketi olarak çalışıyorsa: PyPI'daki son sürüm ile kurulu sürümü karşılaştırır, yeni sürüm varsa güncelleme uyarısı gösterir.
+    """
     try:
-        from rich.prompt import Confirm
+        local_commit = _get_local_commit()
 
-        if _is_working_tree_dirty():
-            return
+        if local_commit:
+            # Git deposu tabanlı kurulum
+            if _is_working_tree_dirty():
+                return
 
-        local = _get_local_commit()
-        remote = _get_remote_commit()
+            remote_commit = _get_remote_commit()
+            if not remote_commit or local_commit == remote_commit:
+                return
 
-        if not local or not remote:
-            return
+            short_local = local_commit[:7]
+            short_remote = remote_commit[:7]
 
-        if local == remote:
-            return
-
-        short_local = local[:7]
-        short_remote = remote[:7]
-
-        console.print(
-            Panel(
-                f"[bold]Yerel sürüm :[/bold] [dim]{short_local}[/dim]\n"
-                f"[bold]Son sürüm   :[/bold] [green]{short_remote}[/green]\n\n"
-                "GitHub'da yeni bir güncelleme mevcut.",
-                title="[bold green]Güncelleme Mevcut[/bold green]",
-                border_style="green",
-            )
-        )
-
-        if not Confirm.ask("Şimdi güncellensin mi?", default=False):
-            return
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-            transient=True,
-        ) as progress:
-            progress.add_task("Güncelleniyor...", total=None)
-            result = subprocess.run(
-                ["git", "pull", "origin", "main"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-        if result.returncode == 0:
             console.print(
                 Panel(
-                    "Güncelleme başarıyla tamamlandı.\n\n"
-                    "[bold]Lütfen uygulamayı yeniden başlatın.[/bold]",
-                    title="[bold green]Güncelleme Tamamlandı[/bold green]",
+                    f"[bold]Yerel sürüm :[/bold] [dim]{short_local}[/dim]\n"
+                    f"[bold]Son sürüm   :[/bold] [green]{short_remote}[/green]\n\n"
+                    "GitHub'da yeni bir güncelleme mevcut.",
+                    title="[bold green]Güncelleme Mevcut (Git)[/bold green]",
                     border_style="green",
                 )
             )
-            sys.exit(0)
-        else:
-            console.print(
-                Panel(
-                    f"[red]git pull başarısız oldu:[/red]\n{result.stderr.strip()}",
-                    title="[bold red]Güncelleme Başarısız[/bold red]",
-                    border_style="red",
-                )
-            )
 
+            from rich.prompt import Confirm
+            if not Confirm.ask("Şimdi güncellensin mi?", default=False):
+                return
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+                transient=True,
+            ) as progress:
+                progress.add_task("Güncelleniyor...", total=None)
+                result = subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+
+            if result.returncode == 0:
+                console.print(
+                    Panel(
+                        "Güncelleme başarıyla tamamlandı.\n\n"
+                        "[bold]Lütfen uygulamayı yeniden başlatın.[/bold]",
+                        title="[bold green]Güncelleme Tamamlandı[/bold green]",
+                        border_style="green",
+                    )
+                )
+                sys.exit(0)
+            else:
+                console.print(
+                    Panel(
+                        f"[red]git pull başarısız oldu:[/red]\n{result.stderr.strip()}",
+                        title="[bold red]Güncelleme Başarısız[/bold red]",
+                        border_style="red",
+                    )
+                )
+        else:
+            # Pip / pipx paket kurulumu
+            installed_ver = _get_installed_version()
+            if not installed_ver:
+                return
+
+            pypi_ver = _get_pypi_version()
+            if not pypi_ver:
+                return
+
+            if _parse_version(pypi_ver) > _parse_version(installed_ver):
+                console.print(
+                    Panel(
+                        f"[bold]Kurulu sürüm :[/bold] [dim]v{installed_ver}[/dim]\n"
+                        f"[bold]Güncel sürüm :[/bold] [green]v{pypi_ver}[/green]\n\n"
+                        "PyPI üzerinde yeni bir MailShift sürümü yayınlandı!\n\n"
+                        "Güncellemek için terminalinizde çalıştırın:\n"
+                        "  [bold cyan]pipx upgrade mailshift[/bold cyan]\n"
+                        "  [dim](pip kullanıyorsanız: pip install --upgrade mailshift)[/dim]",
+                        title="[bold green]Yeni Sürüm Mevcut (PyPI)[/bold green]",
+                        border_style="green",
+                    )
+                )
     except Exception:
         pass
