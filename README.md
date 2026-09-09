@@ -1,282 +1,400 @@
 # MailShift
 
-Privacy-first newsletter & junk mail cleaner for Gmail and Proton Mail.
+<div align="center">
+
+**Privacy-first newsletter & junk mail cleaner for Gmail, Proton Mail, and IMAP.**  
+Clean your inbox with lightning-fast heuristic matching or local AI verification (Ollama & LM Studio). Zero telemetry, 100% local, dry-run by default.
+
+[![PyPI Version](https://img.shields.io/pypi/v/mailshift.svg?color=blue)](https://pypi.org/project/mailshift/)
+[![Python Version](https://img.shields.io/pypi/pyversions/mailshift.svg)](https://pypi.org/project/mailshift/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Local Only](https://img.shields.io/badge/Privacy-100%25%20Local-success.svg)](#privacy--safety-first)
+
+</div>
+
+---
+
+## Table of Contents
+
+- [Screenshots](#screenshots)
+- [Key Features](#key-features)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Email Provider Setup](#email-provider-setup)
+  - [Gmail Setup](#gmail-setup)
+  - [Proton Mail Setup (⚠️ Paid Account Required)](#proton-mail-setup)
+  - [Custom IMAP](#custom-imap-setup)
+- [Scan Modes & Local AI](#scan-modes--local-ai)
+  - [Fast Mode (Heuristic)](#fast-mode)
+  - [Pro Mode (Hybrid Local AI)](#pro-mode)
+  - [Setting up Ollama / LM Studio](#setting-up-ollama--lm-studio)
+- [CLI Usage & Examples](#cli-usage--examples)
+- [CLI Options Reference](#cli-options-reference)
+- [Keyword Customization](#keyword-customization)
+- [One-Click Unsubscribe Assistant](#one-click-unsubscribe-assistant)
+- [Project Architecture](#project-architecture)
+- [Privacy & Safety Guarantees](#privacy--safety-guarantees)
+- [License](#license)
+
+---
 
 ## Screenshots
 
 ### Welcome Screen
-
 ![MailShift Welcome Screen](first.png)
 
-### Fast/Pro Mode and AI Model Selection
-
+### Fast / Pro Mode and AI Model Selection
 ![MailShift Fast/Pro Mode and AI Model Selection](second.png)
 
-## Features
+---
 
-- **Multi provider support**: Gmail (IMAP + App Password), Proton Mail (Requires [Proton Bridge](https://proton.me/mail/bridge) and a paid account), and Custom IMAP servers
-- **Proton Bridge preflight check**: Proton mode probes `127.0.0.1:1143` before IMAP login and guides you to start Bridge with a retry prompt
-- **Attachment protection**: Emails with attachments are never deleted
-- **Phishing detection limitation**: This tool is not designed to detect and delete phishing emails. LLM models cannot reliably distinguish between phishing and legitimate emails.
-- **Fast-mode safety guards**: Premium lifecycle expiry notices, verification code (OTP) emails, and Google Drive/cloud storage fullness alerts are force-kept in Fast mode before junk checks
-- **Fast-mode false-positive reduction**: Blacklist matching excludes the sender address so legitimate automated senders (e.g. `no-reply@github.com`) never trigger a junk decision; whitelist and safety-guard still consider the full sender context
-- **Turkish case normalization**: Fast-mode text is normalized (Turkish İ → i) before heuristic matching, fixing missed matches on properly-capitalised Turkish subjects
-- **Two scan modes**:
-  - `fast` – heuristic keyword matching (blacklist/whitelist)
-  - `pro`  – two-phase analysis: heuristic + local Ollama LLM for smarter detection
-    - Phase 1: Fast heuristic scan
-    - Phase 2: LLM verification on suspicious messages
-        - Robust decision parser accepts `SIL/TUT` text or JSON-style outputs and normalizes Turkish `SİL/SIL` variants
-        - Ollama call uses `/api/chat` with structured JSON decision output for better small-model reliability
-        - Pro mode disables model "thinking" output and uses a larger generation budget to prevent empty decision responses on 2B/4B models
-    - **LM Studio auto-download support**: If no LM Studio model is loaded, interactive Pro mode can trigger LM Studio's download API (`/api/v1/models/download`) and track progress via `/api/v1/models/download/status`
-    - **LM Studio install options**: If LM Studio is missing, interactive Pro mode can offer Windows install via `winget install ElementLabs.LMStudio` or direct download from the official website (`https://lmstudio.ai`)
-    - **LM Studio server lifecycle**: If LM Studio is installed but local server is not running, MailShift can auto-run `lms server start`; if it started the server itself, it attempts `lms server stop` during cleanup
-- **Body preview in Pro mode**: Fetches email body content for better LLM analysis
-- **Dry-run default** – preview before any deletion
-- **Dry-run history logs**: Dry-run candidate results are also saved under `logs/cleanup_log_*.json` for later review
-- **OS Keyring** (Windows Credential Manager) — stores provider-based credentials securely via the `keyring` library for the interactive "reuse previous credentials" prompt. No longer stored in plain-text JSON files.
-- **Unsubscribe suggestions**: After a scan, MailShift detects `List-Unsubscribe` headers and offers three options — auto-unsubscribe from all detected senders, pick individual senders from a numbered list, or export all unsubscribe links to a JSON/TXT file for manual processing. Available in both dry-run and live modes.
-- **Delete options**: Permanent delete or move to Trash
-- **Resilient IMAP deletion**: Delete/trash chunks and expunge retry with exponential back-off and automatic IMAP reconnect on SSL/EOF disconnects
-- **Concurrent fetching** – multi-threaded IMAP operations
-- **Auto worker calculation** – automatically calculates optimal thread count based on hardware
-    - Detects NVIDIA GPUs and Intel/AMD GPUs on Windows for Pro mode worker sizing
-    - Intel/AMD integrated GPU VRAM may be estimated from shared system RAM when dedicated VRAM is not exposed by the driver
-    - Manual worker input is safety-clamped to a backend-aware upper limit (VRAM/RAM/CPU caps); CLI prints a clear warning when clamped
-    - Fast mode does not use worker parallelism for analysis; configuration panel shows workers as "not used" to avoid misleading UX
-    - Pro mode auto-worker can learn from previous phase-2 metrics (timeout/error/p95 latency) and warm-start the next run from local `worker_profiles.json` recommendations
-    - Power users can enable a one-time hardware worker probe with `--power-worker-probe`; this preference is persisted in `power_user_settings.json` and reused in later runs
-- **Cache support** – skip re-fetching headers on repeat scans
-- **Rich CLI UI** – progress bars, tables, colored output with Turkish/English
-    - Progress status labels are sanitized and shortened to stay single-line on narrow terminals (prevents duplicated-looking bars)
-    - Live progress uses ASCII status tags (`SIL`/`TUT`) for more stable rendering across Windows terminals
-- **Cleanup history** – view past deletion reports
-- **Logging** – detailed operation logs
-    - Console warnings/errors are written to stderr to reduce interference with live progress rendering
+## Key Features
 
-## Quick Start (Recommended)
+- 📬 **Multi-Provider Support**:
+  - **Gmail**: IMAP with secure Google App Passwords.
+  - **Proton Mail**: Local IMAP integration via Proton Mail Bridge (*Paid subscription required*).
+  - **Custom IMAP**: Works with any standard IMAP server (SSL / non-SSL).
+- ⚡ **Dual Scan Engines**:
+  - **Fast Mode**: Blazing-fast keyword matching (`blacklist.json` & `whitelist.json`) with Turkish case normalization (`İ` → `i`).
+  - **Pro Mode**: Two-phase hybrid analysis — heuristic pre-filtering followed by local LLM validation (Ollama or LM Studio) with structured JSON decision output (`SIL` / `TUT`).
+- 🛡️ **Safety-First Architecture**:
+  - **Dry-run by default**: No email is deleted or moved unless explicitly requested (`--no-dry-run`).
+  - **Attachment Protection**: Emails with attachments are strictly preserved and never flagged for deletion.
+  - **Heuristic Keep-Guards**: Automatically protects 2FA/OTP codes, account renewal notices, and cloud storage quota alerts.
+  - **OS Keyring Integration**: Securely encrypts and saves credentials via Windows Credential Manager, macOS Keychain, or Linux Secret Service with Pydantic `SecretStr`. No plaintext credentials stored on disk.
+- 📩 **Interactive Unsubscribe Assistant**:
+  - Automatically extracts `List-Unsubscribe` headers (RFC 8058 one-click POST & GET).
+  - Allows 1-click batch unsubscribe, selective sender unsubscribe, or exporting links to JSON/TXT.
+- 🚀 **Intelligent Hardware Tuning**:
+  - Auto-detects NVIDIA GPUs as well as Intel/AMD GPUs on Windows and Linux.
+  - Dynamically calculates safe parallel worker thread counts based on available VRAM, RAM, and CPU cores.
+  - Persists learned hardware performance metrics in `worker_profiles.json` for warm-starting subsequent runs.
+- 📊 **Rich Terminal Interface & Audit Logs**:
+  - Beautiful progress bars and summary tables powered by Rich.
+  - Detailed scan logs and dry-run candidate history saved under `logs/`.
+  - Export scan results to CSV or JSON before taking any action.
 
-MailShift is now available on PyPI.
+---
+
+## Quick Start
+
+MailShift is available on PyPI. You can install and run it in seconds using `pipx`:
 
 ```bash
-# Install from PyPI
+# 1. Install MailShift via pipx
 pipx install mailshift
 
-# Start interactive mode
+# 2. Launch interactive mode
 mailshift
 ```
 
-That's it. Most users only need these two commands.
+Follow the interactive prompts to choose your provider, enter credentials, and select your scan mode.
 
-## Install
+---
 
-### Option A: PyPI (recommended)
+## Installation
+
+### Option A: Using pipx (Recommended)
+
+[`pipx`](https://pypa.github.io/pipx/) installs MailShift in an isolated virtual environment and adds it directly to your PATH:
 
 ```bash
 # Install
 pipx install mailshift
 
-# Upgrade
+# Upgrade to latest version
 pipx upgrade mailshift
 
-# Optional: NVIDIA extra for improved Pro-mode worker sizing
+# Optional: Install with NVIDIA GPU acceleration extra (for optimized Pro mode worker sizing)
 pipx install "mailshift[nvidia]"
 ```
 
-### Option B: Source install (development)
+### Option B: Using standard pip
 
 ```bash
+pip install mailshift
+```
+
+### Option C: From Source (Development)
+
+```bash
+# Clone the repository
 git clone https://github.com/lynchest/MailShift.git
 cd MailShift
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Run MailShift
 python main.py
 ```
 
-## Usage
+---
 
-Use the `mailshift` command if installed via `pipx install mailshift`.
+## Email Provider Setup
+
+### Gmail Setup
+
+Gmail requires an **App Password** instead of your regular Google account password:
+
+1. Enable **2-Step Verification** on your Google Account: [myaccount.google.com/security](https://myaccount.google.com/security).
+2. Generate an App Password at: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+3. Select **Mail** as the app and choose your device, then click **Generate**.
+4. Copy the generated 16-character password (spaces don't matter) and use it when prompted by MailShift.
+
+---
+
+### Proton Mail Setup
+
+> [!IMPORTANT]
+> ### ⚠️ Proton Mail Users: Paid Subscription Required!
+>
+> MailShift connects to Proton Mail through the official desktop client called **[Proton Mail Bridge](https://proton.me/mail/bridge)**, which exposes a local IMAP endpoint (`127.0.0.1:1143`).
+>
+> **Why is a paid account required?**  
+> Proton Mail employs zero-knowledge end-to-end encryption. To allow standard IMAP clients to read and manage emails, Proton decrypts mail locally via the Proton Mail Bridge app. However, **Proton explicitly restricts Bridge access to paid plans** (such as *Proton Mail Plus*, *Proton Unlimited*, *Proton Family*, *Proton Duo*, or *Proton Business*).
+> 
+> ❌ **Free Proton accounts DO NOT support Proton Mail Bridge or IMAP access.**  
+> Consequently, MailShift's Proton Mail integration works **exclusively for users with an active paid Proton subscription**. Free Proton accounts cannot be used with MailShift.
+
+#### How to Connect with Proton Mail:
+
+1. **Install Proton Mail Bridge**: Download and install it from [proton.me/mail/bridge](https://proton.me/mail/bridge).
+2. **Sign In**: Log into your paid Proton account inside the Bridge application.
+3. **Get Your Bridge Credentials**:
+   - In Proton Mail Bridge, locate your account settings.
+   - Click **Mailbox details** to find your **127.0.0.1** port and the **Bridge-generated password** (this is different from your Proton account password).
+4. **Keep Bridge Running**: Ensure Proton Mail Bridge remains running in the background.
+5. **Run MailShift**:
+   ```bash
+   mailshift
+   ```
+   - Select option `[2] Proton`.
+   - MailShift automatically runs a preflight check against `127.0.0.1:1143`. If Bridge isn't running yet, MailShift will pause and prompt you to start it.
+   - Enter your Proton email address and the Bridge-generated password.
+
+---
+
+### Custom IMAP Setup
+
+MailShift supports any standard IMAP server (e.g., Yahoo, Outlook/Hotmail, iCloud, or self-hosted servers like Postfix, Dovecot, Fastmail):
 
 ```bash
-# Interactive mode
-mailshift
-
-# Non-interactive
-mailshift --provider gmail --mode fast \
-    --username you@gmail.com --password "app-password"
-
-# Custom IMAP server
-mailshift --provider custom --mode fast \
-    --username you@example.com --password "your-password" \
-    --host imap.example.com --port 993
-
-# Pro mode with LLM (two-phase analysis)
-mailshift --provider gmail --mode pro \
-    --username you@gmail.com --password "app-password"
-
-# Real deletion (disable dry-run)
-mailshift --provider gmail --mode pro \
-    --username you@gmail.com --password "app-password" --no-dry-run
-
-# Scan only a date window (IMAP SINCE/BEFORE)
-mailshift --provider gmail --mode fast \
-    --username you@gmail.com --password "app-password" \
-    --since 2025-01-01 --before 2026-01-01
-
-# Move to Trash instead of permanent delete
-# (select option 2 when prompted)
-
-# View cleanup history
-mailshift --history
-
-# Export scan results to CSV (before deletion)
-mailshift --provider gmail --mode fast \
-    --username you@gmail.com --password "app-password" \
-    --export results.csv
-
-# Export to JSON
-mailshift --provider gmail --mode fast \
-    --username you@gmail.com --password "app-password" \
-    --export results.json
-
-# Custom Ollama settings
-mailshift --provider gmail --mode pro \
-    --username you@gmail.com --password "app-password" \
-    --ollama-url http://localhost:11434 \
-    --ollama-model qwen3.5:2B
-
-# Custom system prompt for LLM
-mailshift --provider gmail --mode pro \
-    --username you@gmail.com --password "app-password" \
-    --ollama-prompt "Custom prompt here"
+mailshift --provider custom \
+  --host imap.example.com \
+  --port 993 \
+  --username "you@example.com" \
+  --password "your-password"
 ```
 
-If you run from source, replace `mailshift` with `python main.py`.
+---
 
-## Options
+## Scan Modes & Local AI
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--provider` | `gmail`, `proton` or `custom` | prompt |
-| `--mode` | `fast` or `pro` | prompt |
-| `--username` | IMAP email/username | prompt |
-| `--password` | App Password / Bridge password | prompt |
-| `--host` | Custom IMAP server host | - |
-| `--port` | Custom IMAP server port | 993 |
-| `--use-ssl` | Use SSL for IMAP | enabled |
-| `--dry-run` | Preview only (no deletion) | enabled |
-| `--no-dry-run` | Actually delete emails | - |
-| `--scan-limit` | Max messages to scan | all |
-| `--since` | Scan emails on/after date (`YYYY-MM-DD` or `DD-Mon-YYYY`) | - |
-| `--before` | Scan emails before date (`YYYY-MM-DD` or `DD-Mon-YYYY`) | - |
-| `--ollama-url` | Ollama API URL | `http://localhost:11434` |
-| `--ollama-model` | Ollama model | `qwen3.5:2B` |
-| `--ollama-prompt` | Custom system prompt for LLM | default prompt |
-| `--workers` | Manual worker hint (Pro mode); values above safe limit are auto-clamped | auto |
-| `--power-worker-probe` | Enable persisted power-user hardware probe for worker auto tuning | saved preference |
-| `--no-power-worker-probe` | Disable persisted power-user hardware probe | saved preference |
-| `--history` | Show cleanup history | - |
-| `--export` | Export results to CSV/JSON | - |
-| `--uninstall` | Remove MailShift from system | - |
+MailShift offers two distinct scanning modes depending on your speed and accuracy requirements:
 
-- In interactive credential flow, MailShift can store credentials securely in the **OS Keyring** (e.g. Windows Credential Manager) using the **`keyring`** library.
-- **Security**: Passwords and sensitive data are handled using **Pydantic `SecretStr`** in memory and stored in the encrypted system vault on disk. They are never saved in plain text files or accidentally printed in logs. 
-- On later runs, if saved credentials exist, it asks whether to reuse previous values from the secure vault.
-- You can still override credentials anytime via `--username` and `--password` flags.
+### Fast Mode
+- **Speed**: Extremely fast (processes thousands of emails in seconds).
+- **Mechanism**: Pure heuristic matching against `whitelist.json` and `blacklist.json`.
+- **False-Positive Prevention**:
+  - Sender address is stripped before blacklist evaluation so automated notifications from legitimate platforms (e.g., `no-reply@github.com`) are not falsely flagged.
+  - Whitelist and safety guards evaluate the full header and body context.
+  - Turkish case normalization (`İ` → `i`) ensures accurate keyword matches regardless of capitalization.
 
-## Keyword Management
+### Pro Mode
+- **Speed**: In-depth two-phase scan.
+- **Mechanism**:
+  - **Phase 1**: Fast heuristic filter flags potential candidates.
+  - **Phase 2**: Only suspicious candidates are evaluated by a local LLM running in Ollama or LM Studio.
+- **Output**: Models return structured JSON with clear `SIL` (delete) or `TUT` (keep) verdicts and a short reason.
+- **Safety**: If an LLM call times out or encounters an error, MailShift defaults to `TUT` (keep).
 
-Manage whitelist and blacklist keywords directly from CLI:
+### Setting up Ollama / LM Studio
+
+Pro mode uses 100% local AI models—your emails are never uploaded to any external cloud or API.
+
+#### Using Ollama (Default)
+
+1. Install Ollama from [ollama.com](https://ollama.com).
+2. Start the service:
+   ```bash
+   ollama serve
+   ```
+3. Run MailShift in Pro mode:
+   ```bash
+   mailshift --mode pro
+   ```
+4. MailShift will let you select an AI model (e.g. `qwen3.5:0.8B`, `qwen3.5:2B`). If the model is not already downloaded, MailShift will automatically download and verify it for you.
+
+> [!TIP]
+> On Windows, Ollama often runs quietly as a background task. If you ever need to stop it completely, use Task Manager or `taskkill /F /IM ollama.exe`.
+
+#### Using LM Studio
+
+MailShift also features first-class LM Studio integration:
+- Can automatically download models via the LM Studio API (`/api/v1/models/download`).
+- Automatically launches the server (`lms server start`) if installed.
+- Unloads the model from VRAM immediately after the scan completes to free up GPU memory.
+
+---
+
+## CLI Usage & Examples
+
+### Interactive Mode (Default)
+```bash
+mailshift
+```
+Starts the guided step-by-step wizard.
+
+### Non-Interactive CLI Commands
 
 ```bash
-# Add a keyword to whitelist
+# Fast scan on Gmail (Dry run preview)
+mailshift --provider gmail --mode fast \
+  --username "you@gmail.com" --password "your-app-password"
+
+# Proton Mail Fast scan (Requires Proton Bridge running locally)
+mailshift --provider proton --mode fast \
+  --username "you@proton.me" --password "bridge-generated-password"
+
+# Pro Mode with Local LLM (Ollama)
+mailshift --provider gmail --mode pro \
+  --username "you@gmail.com" --password "your-app-password" \
+  --ollama-model "qwen3.5:2B"
+
+# Scan with date range filtering (IMAP SINCE and BEFORE)
+mailshift --provider gmail --mode fast \
+  --username "you@gmail.com" --password "your-app-password" \
+  --since 2025-01-01 --before 2026-01-01
+
+# Limit number of emails scanned (newest first)
+mailshift --provider gmail --mode fast --scan-limit 500
+
+# Export results to CSV or JSON
+mailshift --provider gmail --mode fast --export scan_results.csv
+
+# View history of past cleanups
+mailshift --history
+
+# REAL DELETION (Disable dry-run)
+# NOTE: Always test with dry-run first!
+mailshift --provider gmail --mode fast --no-dry-run
+```
+
+---
+
+## CLI Options Reference
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--provider` | `gmail` \| `proton` \| `custom` | *Interactive* | Email provider. |
+| `--mode` | `fast` \| `pro` | *Interactive* | Analysis mode: fast heuristic or Pro local LLM. |
+| `--username` | string | *Interactive* | Email address or IMAP username. |
+| `--password` | string | *Interactive* | IMAP password (App Password or Bridge password). |
+| `--host` | string | - | Hostname for custom IMAP server. |
+| `--port` | integer | `993` | Port for custom IMAP server. |
+| `--use-ssl` / `--no-ssl` | flag | `--use-ssl` | Toggle SSL encryption for IMAP connection. |
+| `--dry-run` / `--no-dry-run`| flag | `--dry-run` | Preview matches without deleting (default: enabled). |
+| `--scan-limit` | integer | `None` (all) | Maximum number of emails to scan (newest first). |
+| `--since` | string | `None` | Scan emails on or after date (`YYYY-MM-DD` or `DD-Mon-YYYY`). |
+| `--before` | string | `None` | Scan emails before date (`YYYY-MM-DD` or `DD-Mon-YYYY`). |
+| `--ollama-url` | string | `http://localhost:11434` | Ollama service base URL. |
+| `--ollama-model` | string | `qwen3.5:2B` | Ollama model tag to use for Pro analysis. |
+| `--ollama-prompt` | string | *Built-in* | Custom system prompt for the LLM classifier. |
+| `--workers`, `-w` | integer | *Auto* | Manual parallel worker count hint (auto-clamped to hardware limits). |
+| `--power-worker-probe` | flag | *Saved* | Run power-user hardware benchmarking probe to tune worker limits. |
+| `--export` | path | `None` | Save scan report to a CSV or JSON file. |
+| `--history` | flag | - | Display past cleanup logs and statistics. |
+| `--list-keywords` | flag | - | Print all active blacklist and whitelist keywords. |
+| `--add-whitelist` | string | - | Add a keyword or regex pattern to the whitelist. |
+| `--remove-whitelist` | string | - | Remove a keyword from the whitelist. |
+| `--add-blacklist` | string | - | Add a keyword or regex pattern to the blacklist. |
+| `--remove-blacklist` | string | - | Remove a keyword from the blacklist. |
+| `--uninstall` | flag | - | Completely uninstall MailShift and remove local config files. |
+
+---
+
+## Keyword Customization
+
+MailShift uses two JSON files located in the project root:
+- `whitelist.json`: Any email matching these terms will always be kept (`TUT`).
+- `blacklist.json`: Unsolicited patterns, newsletters, campaigns, and spam triggers (`SIL`).
+
+You can manage these keywords directly from the CLI:
+
+```bash
+# Add keywords
 mailshift --add-whitelist "fatura"
+mailshift --add-whitelist "dekont"
+mailshift --add-blacklist "kampanya"
+mailshift --add-blacklist "indirim"
 
-# Remove a keyword from whitelist
+# Remove keywords
 mailshift --remove-whitelist "fatura"
+mailshift --remove-blacklist "kampanya"
 
-# Add a keyword to blacklist
-mailshift --add-blacklist "spam"
-
-# Remove a keyword from blacklist
-mailshift --remove-blacklist "spam"
-
-# List all keywords
+# List current active keywords
 mailshift --list-keywords
 ```
 
-## How It Works
+---
 
-1. **Connect** – IMAP authentication to inbox
-2. **Fetch** – retrieve email headers (concurrent), body for Pro mode
-3. **Analyze**:
-    - Fast: whitelist-first flow (`whitelist.json` match => `TUT`), then suspicious check via `blacklist.json` (`SIL`)
-    - Plus built-in safety guards that force `TUT` for premium expiry lifecycle notices, verification-code mails, and Drive/cloud storage quota-full alerts
-   - Pro: two-phase analysis
-     - Phase 1: heuristic scan to find suspicious messages
-     - Phase 2: run matched mail through Ollama LLM for verification
-4. **Review** – table of messages marked for deletion
-5. **Unsubscribe** *(optional)* – after review, MailShift checks for `List-Unsubscribe` HTTP URLs and offers:
-   - Auto-unsubscribe from all detected senders at once
-   - Select individual senders from a numbered list
-   - Export all links to `logs/unsubscribe_links.json` (or a custom path) for manual processing
-6. **Delete** – permanent delete or move to Trash (empty Trash to permanent delete)
-    - Delete/trash operations automatically retry transient IMAP/SSL socket failures and reconnect before retrying
+## One-Click Unsubscribe Assistant
 
-## Files
+After completing a scan, MailShift inspects the headers of all candidate emails for `List-Unsubscribe` metadata (RFC 2369 / RFC 8058). If found, MailShift displays an interactive menu:
+
+1. **Auto-unsubscribe all**: Sends HTTP GET / One-Click POST requests to all detected unsubscribe endpoints.
+2. **Select individual senders**: View senders with unsubscribe links and choose specific ones.
+3. **Export links**: Dumps all unsubscribe links to `logs/unsubscribe_links.json` (or a custom path) for manual review in your browser.
+4. **Skip**: Proceed directly to the deletion/review step.
+
+---
+
+## Project Architecture
 
 ```
-main.py           CLI entry point
-engine.py         IMAP engine + cache
-config.py         Config models + keyword patterns
-models.py         Data classes
-hardware.py       System info + worker calculation
-fast_analyzer.py  Heuristic analysis
-pro_analyzer.py   LLM analysis (Ollama)
-database.py       Cache storage (SQLite)
-history.py        Cleanup history + export
-logger.py         Logging utilities
-ui.py             Rich UI components
-cli_utils.py      CLI helper functions
-blacklist.json    Keywords → mark for deletion
-whitelist.json   Keywords → always keep
+MailShift/
+├── src/mailshift/
+│   ├── main.py                  # Click CLI entry point & orchestrator
+│   ├── config/                  # Pydantic configuration & default rules
+│   │   └── config.py
+│   ├── core/                    # Engine & Analysis logic
+│   │   ├── engine.py            # Resilient IMAP client with SSL retry & cache
+│   │   ├── session.py           # Worker controller & progress dispatchers
+│   │   └── analyzers/
+│   │       ├── base.py          # Analyzer base classes
+│   │       ├── fast.py          # Fast heuristic keyword analyzer
+│   │       └── pro.py           # Local LLM analyzer (Ollama / LM Studio)
+│   ├── db/                      # SQLite persistence (headers & checkpoints)
+│   │   └── database.py
+│   ├── models/                  # Pydantic & dataclass definitions
+│   │   └── models.py
+│   ├── ui/                      # Rich terminal styling & interactive CLI
+│   │   ├── cli.py               # Prompts & interactive wizards
+│   │   └── styles.py            # Tables, panels & status formatting
+│   └── utils/                   # Hardware detection, keyring, logs, updater
+│       ├── hardware.py          # GPU/CPU worker calculation
+│       ├── history.py           # Audit logging & CSV/JSON export
+│       ├── unsubscribe.py       # List-Unsubscribe RFC 8058 handler
+│       └── power_user_settings.py
+├── blacklist.json               # Default junk keyword definitions
+├── whitelist.json               # Default keep keyword definitions
+├── pyproject.toml               # Package build specifications
+└── requirements.txt             # Python dependencies
 ```
 
-## Gmail App Password
+---
 
-1. Enable 2-Factor Authentication
-2. Go to https://myaccount.google.com/apppasswords
-3. Generate 16-char password for Mail
+## Privacy & Safety Guarantees
 
-## Proton Bridge
+- 🔒 **Zero Telemetry**: MailShift never sends telemetry, analytics, or email content to external cloud servers.
+- 🛡️ **Default Dry-Run**: MailShift will **never** delete an email unless you explicitly run with `--no-dry-run` or confirm deletion in interactive mode.
+- 📎 **Attachment Guard**: Emails with attachments are strictly kept (`TUT`) under all circumstances.
+- 🔑 **Encrypted Credentials**: Stored securely in your operating system's native credentials vault (Windows Credential Manager, macOS Keychain, Linux Secret Service). Plain-text password files are never written.
+- 💾 **Safe IMAP Handling**: Deletions support exponential backoff, automatic reconnects, and the option to move messages to **Trash** instead of permanently deleting.
 
-Run Proton Bridge locally, then connect with bridge credentials.
-If Bridge is closed, MailShift now checks `127.0.0.1:1143` first and prompts you to start Bridge before retrying IMAP login.
+---
 
-## Requirements
+## License
 
-- Python 3.10+
-- IMAP access to your email provider
-- For Pro mode: [Ollama](https://ollama.com) running locally.
-    - On Windows with Intel GPU, MailShift starts `ollama serve` with `OLLAMA_INTEL_GPU=1` (when auto-start is used) and requests higher GPU layer offload in Pro mode to reduce unintended CPU-only inference.
-    - Intel/AMD GPU acceleration still depends on Ollama backend support/driver stack; if Ollama cannot offload, inference can continue on CPU even when MailShift detects the GPU.
-  - **Power User Tip**: Set the `OLLAMA_NUM_PARALLEL` environment variable to increase concurrent workers (default is 4).
-  - **Note**: To close Ollama completely on Windows, you must use the Task Manager as it often runs without a visible window or system tray icon.
-
-## Ollama Kurulduktan Sonra Ne Yapmalıyım?
-
-Pro mode seçiminde Ollama yüklü değilse MailShift otomatik kurulum önerebilir. Kurulum bittiğinde Pro mode'a devam edebilmek için şu adımları izleyin:
-
-1. Terminali kapatıp yeniden açın (PATH güncellemesi için).
-2. Ollama servisini başlatın: `ollama serve`
-3. MailShift'i yeniden çalıştırıp Pro mode seçin.
-4. Model seçim ekranında eksik önerilen model otomatik indirilir (manuel `ollama pull` gerekmez).
-
-Not: Uygulama bu adımları ayrıca panel olarak da gösterir ve otomatik başlatma denemesi yapar. Otomatik başlatma başarısız olursa Fast mode'a güvenli şekilde geri döner.
-
-Not: Önerilen modeller listesine `qwen3.5:0.8B` eklidir ve seçim ekranında `%95 Accurate` etiketiyle gösterilir.
-
-## Tests
-
-- Run all tests with: `py -3.14 -m pytest tests/`
-- Gmail delete and move-to-trash flows are covered in `tests/test_google_delete_trash.py`.
+MailShift is released under the [MIT License](LICENSE).
