@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mailshift"
-version = "1.0.1"
+version = "1.0.2"
 description = "Privacy-first newsletter & junk mail cleaner for Gmail, Proton Mail and IMAP"
 readme = "README.md"
 license = { text = "MIT" }
