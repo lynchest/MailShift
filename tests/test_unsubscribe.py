@@ -1,6 +1,7 @@
 import json
 import http.client
 import socket
+import ssl
 import shutil
 import tempfile
 import threading
@@ -213,6 +214,13 @@ def test_pinned_https_uses_original_hostname_for_tls_sni(monkeypatch):
             pass
 
     class FakeContext:
+        verify_mode = ssl.CERT_REQUIRED
+        check_hostname = True
+        post_handshake_auth = None
+
+        def set_alpn_protocols(self, protocols):
+            pass
+
         def wrap_socket(self, sock, *, server_hostname):
             calls["server_hostname"] = server_hostname
             return sock
