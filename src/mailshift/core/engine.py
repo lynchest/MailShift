@@ -48,14 +48,41 @@ def chunk_list(lst: list, n: int):
 
 def _connect(cfg: IMAPConfig, timeout: int = 30) -> IMAPConnection:
     """Open an IMAP connection with an explicit socket timeout."""
-    socket.setdefaulttimeout(timeout)
     conn = (
-        imaplib.IMAP4_SSL(cfg.host, cfg.port, ssl_context=ssl.create_default_context())
+        imaplib.IMAP4_SSL(cfg.host, cfg.port, ssl_context=ssl.create_default_context(), timeout=timeout)
         if cfg.use_ssl
-        else imaplib.IMAP4(cfg.host, cfg.port)
+        else imaplib.IMAP4(cfg.host, cfg.port, timeout=timeout)
     )
-    conn.login(cfg.username, cfg.password.get_secret_value())
+    try:
+        conn.login(cfg.username, cfg.password.get_secret_value())
+    except Exception:
+        try:
+            conn.shutdown()
+        except Exception:
+            pass
+        raise
     return conn
+
+
+def _expunge_uids(conn: IMAPConnection, uids: list[str]) -> bool:
+    """Safely expunge selected UIDs; refuse global expunge around pre-deleted mail."""
+    if any(cap.upper() == b"UIDPLUS" for cap in conn.capabilities):
+        status, _ = conn.uid("expunge", ",".join(uids))
+        if status != "OK":
+            raise RuntimeError(f"UID EXPUNGE returned {status}")
+        return True
+
+    status, _ = conn.expunge()
+    if status != "OK":
+        raise RuntimeError(f"EXPUNGE returned {status}")
+    return True
+
+
+def _has_preexisting_deleted(conn: IMAPConnection) -> bool:
+    status, data = conn.uid("search", None, "DELETED")
+    if status != "OK":
+        raise RuntimeError("Cannot verify existing deleted messages; operation cancelled")
+    return bool(data and data[0].strip())
 
 
 def _decode_header_value(raw: str | bytes | None) -> str:
@@ -232,7 +259,13 @@ class MailEngine:
             f"(timeout={self._rl.connect_timeout}s)"
         )
         self._conn = _connect(self.cfg.imap, timeout=self._rl.connect_timeout)
-        self._conn.select("INBOX")
+        try:
+            status, _ = self._conn.select("INBOX")
+            if status != "OK":
+                raise RuntimeError(f"INBOX SELECT returned {status}")
+        except Exception:
+            self.disconnect()
+            raise
         log.info("IMAP connection established and INBOX selected")
 
     def disconnect(self) -> None:
@@ -601,6 +634,16 @@ class MailEngine:
         total_chunks = len(chunks)
         log.info(f"Deleting {len(uids)} messages in {total_chunks} chunks")
 
+        uidplus = any(cap.upper() == b"UIDPLUS" for cap in self._conn.capabilities)
+        if not uidplus:
+            try:
+                if _has_preexisting_deleted(self._conn):
+                    log.warning("Pre-existing \\Deleted messages found; deletion cancelled to protect them")
+                    return []
+            except Exception as exc:
+                log.error(f"Cannot safely delete messages: {exc}")
+                return []
+
         for chunk_idx, chunk in enumerate(chunks, start=1):
             uid_str = ",".join(chunk)
 
@@ -631,7 +674,7 @@ class MailEngine:
         log.info("Expunging deleted messages")
         try:
             _with_retry(
-                lambda: self._conn.expunge(),
+                lambda: _expunge_uids(self._conn, deleted),
                 rl,
                 label="delete expunge",
                 on_error=lambda exc, attempt: self._recover_connection(
@@ -739,18 +782,33 @@ class MailEngine:
             f"Moving {len(uids)} messages to trash folders {folders} "
             f"in {total_chunks} chunks"
         )
+        uidplus = any(cap.upper() == b"UIDPLUS" for cap in self._conn.capabilities)
+        if not uidplus:
+            try:
+                if _has_preexisting_deleted(self._conn):
+                    log.warning("Pre-existing \\Deleted messages found; trash move cancelled to protect them")
+                    return []
+            except Exception as exc:
+                log.error(f"Cannot safely move messages to trash: {exc}")
+                return []
 
         for chunk_idx, chunk in enumerate(chunks, start=1):
             uid_str = ",".join(chunk)
             chunk_folders = list(folders)
+            copy_attempted = False
 
             # --- HATA DÜZELTİLDİ: Copy ve Store işlemleri ayrıldı ---
             def _copy(u=uid_str):
+                nonlocal copy_attempted
+                if copy_attempted:
+                    raise RuntimeError("COPY outcome is uncertain after connection loss; retry cancelled")
                 last_status = "NO"
                 for folder in chunk_folders:
+                    copy_attempted = True
                     status, _ = self._conn.uid("copy", u, f'"{folder}"')
                     if status == "OK":
                         return  # Başarılı kopyalama, Store işi diğer adıma bırakıldı.
+                    copy_attempted = False
                     last_status = status
                     log.debug(f"COPY returned {status} for trash folder '{folder}', trying next candidate")
                 raise RuntimeError(f"COPY returned {last_status}")
@@ -796,9 +854,11 @@ class MailEngine:
             if chunk_idx < total_chunks and rl.chunk_delay > 0:
                 time.sleep(rl.chunk_delay)
 
+        if not moved:
+            return []
         try:
             _with_retry(
-                lambda: self._conn.expunge(), rl, label="trash expunge",
+                lambda: _expunge_uids(self._conn, moved), rl, label="trash expunge",
                 on_error=lambda exc, attempt: self._recover_connection(exc, "trash expunge", attempt),
             )
         except Exception as exc:

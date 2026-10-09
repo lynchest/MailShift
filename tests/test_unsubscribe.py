@@ -14,6 +14,7 @@ from mailshift.utils.unsubscribe import (
     export_unsubscribe_links,
     is_safe_url,
     perform_unsubscribe,
+    unsubscribe_log_host,
 )
 from mailshift.models.models import MailMeta, ScanResult
 
@@ -118,11 +119,8 @@ def test_perform_unsubscribe_blocked():
     assert "blocked" in message.lower()
 
 
-def test_perform_unsubscribe_redirect_blocked(mocker):
+def test_perform_unsubscribe_redirect_blocked():
     """Verify that perform_unsubscribe blocks unsafe redirects."""
-    if mocker is None:
-        pytest.skip("mocker fixture not available")
-
     # Mock opener.open to simulate a redirect that fails safety check
     # In reality, SafeRedirectHandler would raise the error
     # Here we can just verify it uses our is_safe_url
@@ -135,6 +133,10 @@ def test_perform_unsubscribe_redirect_blocked(mocker):
         handler.redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/malicious")
     assert excinfo.value.code == 403
     assert "unsafe URL" in excinfo.value.reason
+
+
+def test_unsubscribe_log_host_omits_path_and_token():
+    assert unsubscribe_log_host("https://mail.example:8443/unsubscribe/secret?token=abc#fragment") == "mail.example"
 
 
 if __name__ == "__main__":
