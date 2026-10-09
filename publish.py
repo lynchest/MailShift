@@ -9,8 +9,7 @@ PYPROJECT = Path("pyproject.toml")
 def run(cmd):
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
-        print(f"\nHata: '{cmd}' başarısız oldu.")
-        exit(1)
+        raise RuntimeError(f"\nHata: '{cmd}' başarısız oldu.")
 
 def get_current_version():
     content = PYPROJECT.read_text()
@@ -60,11 +59,15 @@ def main():
     if Path("dist").exists():
         shutil.rmtree("dist")
 
-    print("[3/4] Build alınıyor...")
-    run("hatch build")
+    try:
+        print("[3/4] Build alınıyor...")
+        run("hatch build")
 
-    print("[4/4] PyPI'ya yükleniyor...")
-    run("twine upload --config-file .pypirc dist/*")
+        print("[4/4] PyPI'ya yükleniyor...")
+        run("twine upload --config-file .pypirc dist/*")
+    except BaseException:
+        update_version(new_version, current)
+        raise
 
     print(f"\nTamamdı! mailshift {new_version} PyPI'da.")
     print(f"https://pypi.org/project/mailshift/{new_version}/")

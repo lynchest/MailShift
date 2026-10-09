@@ -5,20 +5,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Python 3.10 or newer is required
+py -3.14 -m pip install -e ".[dev]"  # Windows
+# python3.14 -m pip install -e ".[dev]"  # macOS/Linux
 
 # Run all tests
-py -3.14 -m pytest tests/
+py -3.14 -m pytest tests/ -q
 
 # Run a single test file
 py -3.14 -m pytest tests/test_fast_analyzer.py
 
 # Run the app
-python main.py
+mailshift --help
 ```
 
-**Python interpreter**: Always use `py -3.14`, not `python` or `python3`. No lint step is configured.
+**Python support**: Python 3.10+. For local tests, use `py -3.14` on Windows or `python3.14` elsewhere. No lint step is configured.
 
 ## Architecture
 
