@@ -1,6 +1,10 @@
 import json
+import http.client
+import socket
 import shutil
 import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 try:
@@ -9,6 +13,8 @@ except ImportError:
     pytest = None
 
 from mailshift.utils.unsubscribe import (
+    _PinnedHTTPSConnection,
+    _SafeURLResolver,
     UnsubscribeEntry,
     build_unsubscribe_entries,
     export_unsubscribe_links,
@@ -133,6 +139,97 @@ def test_perform_unsubscribe_redirect_blocked():
         handler.redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/malicious")
     assert excinfo.value.code == 403
     assert "unsafe URL" in excinfo.value.reason
+
+
+def test_resolver_rejects_hostname_with_any_non_public_address(monkeypatch):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.4", 0)),
+        ],
+    )
+    assert _SafeURLResolver().resolve("https://mixed.example/") is None
+
+
+def test_perform_unsubscribe_pins_ip_and_preserves_host(monkeypatch):
+    received = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received.append(self.headers["Host"])
+            if self.path == "/leave":
+                self.send_response(302)
+                self.send_header("Location", f"http://next.example:{port}/done")
+            else:
+                self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    port = server.server_port
+    original_getaddrinfo = socket.getaddrinfo
+    original_connect = socket.create_connection
+    dns_calls = []
+    connect_targets = []
+
+    def fake_getaddrinfo(host, requested_port, *args, **kwargs):
+        if host in ("mail.example", "next.example"):
+            dns_calls.append(host)
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+        return original_getaddrinfo(host, requested_port, *args, **kwargs)
+
+    def fake_connect(address, timeout=None, source_address=None):
+        connect_targets.append(address)
+        if address[0] == "93.184.216.34":
+            address = ("127.0.0.1", address[1])
+        return original_connect(address, timeout, source_address)
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(socket, "create_connection", fake_connect)
+    try:
+        success, message = perform_unsubscribe(f"http://mail.example:{port}/leave")
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+    assert (success, message) == (True, "GET 200")
+    assert dns_calls == ["mail.example", "next.example"]
+    assert connect_targets == [("93.184.216.34", port)] * 2
+    assert received == [f"mail.example:{port}", f"next.example:{port}"]
+
+
+def test_pinned_https_uses_original_hostname_for_tls_sni(monkeypatch):
+    calls = {}
+
+    class FakeSocket:
+        def setsockopt(self, *args):
+            pass
+
+    class FakeContext:
+        def wrap_socket(self, sock, *, server_hostname):
+            calls["server_hostname"] = server_hostname
+            return sock
+
+    conn = _PinnedHTTPSConnection(
+        "mail.example", pinned_ip="93.184.216.34", context=FakeContext()
+    )
+    monkeypatch.setattr(
+        conn,
+        "_create_connection",
+        lambda address, timeout, source: calls.update(target=address) or FakeSocket(),
+    )
+    conn.connect()
+    assert calls == {
+        "target": ("93.184.216.34", 443),
+        "server_hostname": "mail.example",
+    }
 
 
 def test_unsubscribe_log_host_omits_path_and_token():

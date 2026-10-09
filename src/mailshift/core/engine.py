@@ -361,7 +361,7 @@ class MailEngine:
         rl = self._rl
 
         if resume:
-            done = get_fetched_uids()
+            done = get_fetched_uids(self.cfg.imap.username, self.cfg.imap.host, "INBOX")
             pending = [u for u in uids if u not in done]
             log.info(
                 f"Resume mode: {len(done)} already fetched, "
@@ -434,7 +434,9 @@ class MailEngine:
                     progress_cb(meta)
 
             if chunk_results:
-                mark_uids_fetched([m.uid for m in chunk_results])
+                mark_uids_fetched(
+                    [m.uid for m in chunk_results], self.cfg.imap.username, self.cfg.imap.host, "INBOX"
+                )
                 save_mails_cache(chunk_results, batch_size=rl.db_batch_size)
 
             if had_retry:
@@ -884,6 +886,8 @@ class MailEngine:
             self.connect()
             uids = self.list_uids()
             if not uids:
+                from ..db.database import clear_checkpoint
+                clear_checkpoint(self.cfg.imap.username, self.cfg.imap.host, "INBOX")
                 log.info("No messages found.")
                 return [], ScanStats()
 
@@ -891,6 +895,8 @@ class MailEngine:
                 uids, progress_cb=fetch_progress_cb, resume=resume
             )
             results, stats = self.analyze(mails, progress_cb=analyze_progress_cb)
+            from ..db.database import clear_checkpoint
+            clear_checkpoint(self.cfg.imap.username, self.cfg.imap.host, "INBOX")
 
             if not self.cfg.dry_run and (
                 delete_uids := [r.mail.uid for r in results if r.decision == "SIL"]
