@@ -46,6 +46,12 @@ def build_unsubscribe_entries(results) -> list[UnsubscribeEntry]:
     return sorted(seen.values(), key=lambda e: e.mail_count, reverse=True)
 
 
+def unsubscribe_log_host(url: str) -> str:
+    """Return only the host for logs, omitting paths and token-bearing query data."""
+    parsed = urlparse(url)
+    return parsed.hostname or "unknown host"
+
+
 class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     """
     Custom redirect handler that validates the target URL before following it.

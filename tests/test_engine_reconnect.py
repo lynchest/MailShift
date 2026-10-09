@@ -16,12 +16,13 @@ def test_delete_mails_reconnects_after_ssl_eof() -> None:
     engine = MailEngine(cfg)
 
     original_conn = MagicMock()
+    original_conn.capabilities = (b"IMAP4REV1", b"UIDPLUS")
     original_conn.uid.side_effect = ssl.SSLEOFError("EOF occurred in violation of protocol")
     original_conn.logout.return_value = "BYE"
 
     reconnected_conn = MagicMock()
+    reconnected_conn.capabilities = (b"IMAP4REV1", b"UIDPLUS")
     reconnected_conn.uid.return_value = ("OK", [b"done"])
-    reconnected_conn.expunge.return_value = ("OK", [b"expunged"])
 
     engine._conn = original_conn
 
@@ -38,11 +39,15 @@ def test_delete_mails_returns_empty_when_expunge_fails_after_retries() -> None:
     engine = MailEngine(cfg)
 
     conn = MagicMock()
-    conn.uid.return_value = ("OK", [b"done"])
-    conn.expunge.side_effect = ssl.SSLEOFError("EOF occurred in violation of protocol")
+    conn.capabilities = (b"IMAP4REV1", b"UIDPLUS")
+    conn.uid.side_effect = [
+        ("OK", [b"done"]),
+        ssl.SSLEOFError("EOF occurred in violation of protocol"),
+    ]
 
     reconnect_conn = MagicMock()
-    reconnect_conn.expunge.side_effect = ssl.SSLEOFError("EOF occurred in violation of protocol")
+    reconnect_conn.capabilities = (b"IMAP4REV1", b"UIDPLUS")
+    reconnect_conn.uid.side_effect = ssl.SSLEOFError("EOF occurred in violation of protocol")
 
     engine._conn = conn
 
@@ -78,3 +83,18 @@ def test_force_reconnect_ignores_logout_exception() -> None:
 
     # engine now uses the new connection
     assert engine._conn is reconnected_conn
+
+
+def test_connect_closes_connection_when_inbox_select_fails() -> None:
+    engine = MailEngine(_make_app_cfg())
+    conn = MagicMock()
+    conn.select.return_value = ("NO", [b"denied"])
+    with patch("mailshift.core.engine._connect", return_value=conn):
+        try:
+            engine.connect()
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("select failure should propagate")
+    conn.logout.assert_called_once()
+    assert engine._conn is None

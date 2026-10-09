@@ -121,7 +121,7 @@ def _prompt_unsubscribe(to_delete: list) -> None:
     Option 2 – pick senders interactively from a numbered list.
     Option 3 – export all links to a file for manual processing.
     """
-    from .utils.unsubscribe import build_unsubscribe_entries, perform_unsubscribe, export_unsubscribe_links
+    from .utils.unsubscribe import build_unsubscribe_entries, export_unsubscribe_links, perform_unsubscribe, unsubscribe_log_host
 
     entries = build_unsubscribe_entries(to_delete)
     if not entries:
@@ -165,7 +165,7 @@ def _do_unsubscribe_all(entries, perform_fn) -> None:
         task = progress.add_task("unsub", total=len(entries))
         for entry in entries:
             success, msg = perform_fn(entry.unsubscribe_url)
-            log.info(f"Unsubscribe {'OK' if success else 'FAIL'} [{msg}]: {entry.unsubscribe_url}")
+            log.info(f"Unsubscribe {'OK' if success else 'FAIL'} host={unsubscribe_log_host(entry.unsubscribe_url)}")
             if success:
                 ok += 1
             else:
