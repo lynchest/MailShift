@@ -53,24 +53,61 @@ def test_mails_cache_operations(mock_db_file):
 
 
 def test_checkpoint_operations(mock_db_file):
+    scope = ("user@example.com", "imap.example.com", "INBOX")
     # Empty checkpoint
-    assert database.get_fetched_uids() == set()
+    assert database.get_fetched_uids(*scope) == set()
 
     # Mark some as fetched
-    database.mark_uids_fetched(["uid1", "uid2"])
-    fetched = database.get_fetched_uids()
+    database.mark_uids_fetched(["uid1", "uid2"], *scope)
+    fetched = database.get_fetched_uids(*scope)
     assert fetched == {"uid1", "uid2"}
 
     # Add more
-    database.mark_uids_fetched(["uid3"])
-    assert database.get_fetched_uids() == {"uid1", "uid2", "uid3"}
+    database.mark_uids_fetched(["uid3"], *scope)
+    assert database.get_fetched_uids(*scope) == {"uid1", "uid2", "uid3"}
 
     # Clear checkpoint
-    database.clear_checkpoint()
+    database.clear_checkpoint(*scope)
     
     # Wait, clear_checkpoint only empties the table, the file still exists
     # but the set should be empty.
-    assert database.get_fetched_uids() == set()
+    assert database.get_fetched_uids(*scope) == set()
+
+
+def test_checkpoint_isolated_by_account_host_and_mailbox(mock_db_file):
+    scopes = [
+        ("one@example.com", "imap.example.com", "INBOX"),
+        ("two@example.com", "imap.example.com", "INBOX"),
+        ("one@example.com", "other.example.com", "INBOX"),
+        ("one@example.com", "imap.example.com", "Archive"),
+    ]
+    for scope in scopes:
+        database.mark_uids_fetched(["same-uid"], *scope)
+
+    assert all(database.get_fetched_uids(*scope) == {"same-uid"} for scope in scopes)
+    database.clear_checkpoint(*scopes[0])
+    assert database.get_fetched_uids(*scopes[0]) == set()
+    assert all(database.get_fetched_uids(*scope) == {"same-uid"} for scope in scopes[1:])
+
+    with database.get_db_connection() as conn:
+        scope_keys = [row[0] for row in conn.execute("SELECT DISTINCT scope_key FROM fetch_checkpoint")]
+    assert "one@example.com" not in scope_keys
+
+
+def test_init_db_migrates_legacy_checkpoint_without_losing_rows(mock_db_file):
+    import sqlite3
+
+    with sqlite3.connect(mock_db_file) as conn:
+        conn.execute("CREATE TABLE fetch_checkpoint (uid TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO fetch_checkpoint (uid) VALUES ('legacy-uid')")
+
+    database._DB_INITIALIZED = False
+    database.init_db()
+
+    with database.get_db_connection() as conn:
+        assert conn.execute("SELECT scope_key, uid FROM fetch_checkpoint").fetchall() == [
+            ("legacy", "legacy-uid")
+        ]
 
 
 def test_get_db_connection_pragmas(mock_db_file):
@@ -90,7 +127,7 @@ def test_get_db_connection_pragmas(mock_db_file):
 def test_get_db_connection_commit(mock_db_file):
     database.init_db()  # Create tables
     with database.get_db_connection() as conn:
-        conn.execute("INSERT INTO fetch_checkpoint (uid) VALUES ('test_uid')")
+        conn.execute("INSERT INTO fetch_checkpoint (scope_key, uid) VALUES ('test', 'test_uid')")
 
     # Verify commit happened automatically
     with database.get_db_connection() as conn:
@@ -105,7 +142,7 @@ def test_get_db_connection_rollback(mock_db_file):
 
     with pytest.raises(DummyException):
         with database.get_db_connection() as conn:
-            conn.execute("INSERT INTO fetch_checkpoint (uid) VALUES ('rollback_uid')")
+            conn.execute("INSERT INTO fetch_checkpoint (scope_key, uid) VALUES ('test', 'rollback_uid')")
             raise DummyException("Force rollback")
 
     # Verify rollback happened automatically

@@ -83,7 +83,7 @@ from .core.session import (
     LLMWorker,
     AdaptiveWorkerController,
 )
-from .db.database import save_mails_cache, load_mails_cache_by_uids
+from .db.database import save_mails_cache, load_mails_cache_by_uids, clear_checkpoint
 from .core.analyzers.pro import (
     check_ollama_health,
     check_lm_studio_health,
@@ -584,6 +584,7 @@ def main(
             current_uids = engine.list_uids()
 
         if not current_uids:
+            clear_checkpoint(cfg.imap.username, cfg.imap.host, "INBOX")
             return console.print("[yellow]No messages found in INBOX.[/yellow]")
 
         console.print(f"[green]Found [bold]{len(current_uids)}[/bold] message(s) in INBOX.[/green]")
@@ -806,6 +807,7 @@ def main(
                 _, raw_stats = engine.analyze(mails, progress_cb=analyze_handler)
 
         # Build final stats object
+        clear_checkpoint(cfg.imap.username, cfg.imap.host, "INBOX")
         for r in scan_results:
             stats.total_scanned += 1
             stats.total_size_bytes += r.mail.size_bytes

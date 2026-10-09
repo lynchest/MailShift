@@ -221,6 +221,22 @@ def test_list_uids_without_scan_limit_returns_all():
     assert len(uids) == 10
 
 
+def test_engine_run_clears_only_completed_account_checkpoint():
+    imap = build_imap_config(Provider.GMAIL, "u@g.com", "p")
+    cfg = AppConfig(provider=Provider.GMAIL, mode=Mode.FAST, imap=imap)
+    engine = MailEngine(cfg)
+    engine.connect = MagicMock()
+    engine.disconnect = MagicMock()
+    engine.list_uids = MagicMock(return_value=["1"])
+    engine.fetch_headers_concurrent = MagicMock(return_value=[])
+    engine.analyze = MagicMock(return_value=([], ScanStats()))
+
+    with patch("mailshift.db.database.clear_checkpoint") as clear_checkpoint:
+        assert engine.run() == ([], engine.analyze.return_value[1])
+
+    clear_checkpoint.assert_called_once_with("u@g.com", "imap.gmail.com", "INBOX")
+
+
 # ---------------------------------------------------------------------------
 # pro_analyze – Ollama LLM (mocked HTTP)
 # ---------------------------------------------------------------------------

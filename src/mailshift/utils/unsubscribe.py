@@ -4,6 +4,7 @@ unsubscribe.py – Utilities for handling List-Unsubscribe actions.
 from __future__ import annotations
 
 import ipaddress
+import http.client
 import json
 import socket
 import urllib.error
@@ -57,8 +58,12 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     Custom redirect handler that validates the target URL before following it.
     """
 
+    def __init__(self, resolver=None):
+        super().__init__()
+        self.resolver = resolver or _SafeURLResolver()
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if not is_safe_url(newurl):
+        if not self.resolver.resolve(newurl):
             log.warning(f"Blocking redirect to unsafe URL: {newurl}")
             raise urllib.error.HTTPError(
                 newurl, 403, "Redirect to unsafe URL blocked", headers, None
@@ -66,41 +71,91 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def _is_public_ip(ip_str: str) -> bool:
+    return ipaddress.ip_address(ip_str).is_global
+
+
+class _SafeURLResolver:
+    def __init__(self):
+        self.pins: dict[str, str] = {}
+
+    def resolve(self, url: str) -> str | None:
+        if url in self.pins:
+            return self.pins[url]
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                return None
+            addr_info = socket.getaddrinfo(
+                parsed.hostname, parsed.port, type=socket.SOCK_STREAM
+            )
+            addresses = [info[4][0] for info in addr_info]
+            if not addresses or any(not _is_public_ip(address) for address in addresses):
+                log.warning(f"Blocking potentially unsafe URL: {url}")
+                return None
+            self.pins[url] = addresses[0]
+            return addresses[0]
+        except Exception as exc:
+            log.debug(f"Error validating URL {url}: {exc}")
+            return None
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host, *, pinned_ip, **kwargs):
+        super().__init__(host, **kwargs)
+        self.pinned_ip = pinned_ip
+
+    def connect(self):
+        self.sock = self._create_connection(
+            (self.pinned_ip, self.port), self.timeout, self.source_address
+        )
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _PinnedHTTPSConnection(_PinnedHTTPConnection, http.client.HTTPSConnection):
+    def connect(self):
+        _PinnedHTTPConnection.connect(self)
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, resolver):
+        super().__init__()
+        self.resolver = resolver
+
+    def http_open(self, req):
+        pinned_ip = self.resolver.resolve(req.full_url)
+        if not pinned_ip:
+            raise urllib.error.URLError("URL blocked for security reasons")
+        connection = lambda host, **kwargs: _PinnedHTTPConnection(
+            host, pinned_ip=pinned_ip, **kwargs
+        )
+        return self.do_open(connection, req)
+
+
+class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, resolver):
+        super().__init__()
+        self.resolver = resolver
+
+    def https_open(self, req):
+        pinned_ip = self.resolver.resolve(req.full_url)
+        if not pinned_ip:
+            raise urllib.error.URLError("URL blocked for security reasons")
+        connection = lambda host, **kwargs: _PinnedHTTPSConnection(
+            host, pinned_ip=pinned_ip, context=self._context, **kwargs
+        )
+        return self.do_open(connection, req)
+
+
 def is_safe_url(url: str) -> bool:
     """
     Check if a URL is safe to request (prevents SSRF).
     Only allows http/https and blocks private/local IP ranges.
     """
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False
-
-        hostname = parsed.hostname
-        if not hostname:
-            return False
-
-        # Resolve hostname to IP addresses and check each
-        # This helps prevent SSRF against internal services
-        addr_info = socket.getaddrinfo(hostname, None)
-        for info in addr_info:
-            ip_str = info[4][0]
-            ip = ipaddress.ip_address(ip_str)
-            if (
-                ip.is_loopback
-                or ip.is_private
-                or ip.is_link_local
-                or ip.is_multicast
-                or ip.is_reserved
-                or ip.is_unspecified
-            ):
-                log.warning(f"Blocking potentially unsafe URL: {url} (resolved to {ip_str})")
-                return False
-
-        return True
-    except Exception as exc:
-        log.debug(f"Error validating URL {url}: {exc}")
-        return False
+    return _SafeURLResolver().resolve(url) is not None
 
 
 def perform_unsubscribe(url: str) -> tuple[bool, str]:
@@ -112,10 +167,16 @@ def perform_unsubscribe(url: str) -> tuple[bool, str]:
 
     Returns ``(success, status_message)``.
     """
-    if not is_safe_url(url):
+    resolver = _SafeURLResolver()
+    if not resolver.resolve(url):
         return False, "URL blocked for security reasons"
 
-    opener = urllib.request.build_opener(SafeRedirectHandler())
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _PinnedHTTPHandler(resolver),
+        _PinnedHTTPSHandler(resolver),
+        SafeRedirectHandler(resolver),
+    )
     headers = {"User-Agent": "Mozilla/5.0 (compatible; MailShift/1.0)"}
 
     # --- GET attempt ---

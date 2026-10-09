@@ -1,3 +1,5 @@
+import hashlib
+import json
 import sqlite3
 from pathlib import Path
 from typing import Optional, Iterator, List, Set, Dict
@@ -44,15 +46,32 @@ def init_db() -> None:
                 unsubscribe_url TEXT DEFAULT ''
             );
 
-            -- Checkpoint table: tracks which UIDs have been fully processed
+            -- Checkpoint table: tracks fetched UIDs per account and mailbox scope
             CREATE TABLE IF NOT EXISTS fetch_checkpoint (
-                uid TEXT PRIMARY KEY
+                scope_key TEXT NOT NULL,
+                uid TEXT NOT NULL,
+                PRIMARY KEY (scope_key, uid)
             );
         ''')
         # Migration: add unsubscribe_url column to existing DBs that predate this field
         existing = {row[1] for row in conn.execute("PRAGMA table_info(mails_cache)").fetchall()}
         if "unsubscribe_url" not in existing:
             conn.execute("ALTER TABLE mails_cache ADD COLUMN unsubscribe_url TEXT DEFAULT ''")
+        checkpoint_columns = {row[1] for row in conn.execute("PRAGMA table_info(fetch_checkpoint)")}
+        if "scope_key" not in checkpoint_columns:
+            conn.execute("ALTER TABLE fetch_checkpoint RENAME TO fetch_checkpoint_legacy")
+            conn.execute("""
+                CREATE TABLE fetch_checkpoint (
+                    scope_key TEXT NOT NULL,
+                    uid TEXT NOT NULL,
+                    PRIMARY KEY (scope_key, uid)
+                )
+            """)
+            conn.execute("""
+                INSERT INTO fetch_checkpoint (scope_key, uid)
+                SELECT 'legacy', uid FROM fetch_checkpoint_legacy
+            """)
+            conn.execute("DROP TABLE fetch_checkpoint_legacy")
     _DB_INITIALIZED = True
 
 # ---------------------------------------------------------------------------
@@ -164,7 +183,12 @@ def clear_mails_cache() -> None:
 # Checkpoint helpers
 # ---------------------------------------------------------------------------
 
-def mark_uids_fetched(uids: List[str]) -> None:
+def _checkpoint_scope(username: str, host: str, mailbox: str) -> str:
+    scope = json.dumps([username, host.casefold(), mailbox.casefold()], ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(scope.encode("utf-8")).hexdigest()
+
+
+def mark_uids_fetched(uids: List[str], username: str, host: str, mailbox: str = "INBOX") -> None:
     """Record that *uids* have been successfully fetched in the current run."""
     if not uids:
         return
@@ -172,11 +196,11 @@ def mark_uids_fetched(uids: List[str]) -> None:
     init_db()
     with get_db_connection() as conn:
         conn.executemany(
-            "INSERT OR IGNORE INTO fetch_checkpoint (uid) VALUES (?)",
-            [(u,) for u in uids],
+            "INSERT OR IGNORE INTO fetch_checkpoint (scope_key, uid) VALUES (?, ?)",
+            [(_checkpoint_scope(username, host, mailbox), u) for u in uids],
         )
 
-def get_fetched_uids() -> Set[str]:
+def get_fetched_uids(username: str, host: str, mailbox: str = "INBOX") -> Set[str]:
     """Return the set of UIDs already checkpointed (fetched) in this run."""
     if not DB_FILE.exists():
         return set()
@@ -184,16 +208,22 @@ def get_fetched_uids() -> Set[str]:
     init_db()
     try:
         with get_db_connection() as conn:
-            cursor = conn.execute("SELECT uid FROM fetch_checkpoint")
+            cursor = conn.execute(
+                "SELECT uid FROM fetch_checkpoint WHERE scope_key = ?",
+                (_checkpoint_scope(username, host, mailbox),),
+            )
             return {row[0] for row in cursor.fetchall()}
     except sqlite3.Error:
         return set()
 
-def clear_checkpoint() -> None:
-    """Wipe the checkpoint table so the next run starts fresh."""
+def clear_checkpoint(username: str, host: str, mailbox: str = "INBOX") -> None:
+    """Clear checkpoint rows for one account and mailbox."""
     if not DB_FILE.exists():
         return
         
     init_db()
     with get_db_connection() as conn:
-        conn.execute("DELETE FROM fetch_checkpoint")
+        conn.execute(
+            "DELETE FROM fetch_checkpoint WHERE scope_key = ?",
+            (_checkpoint_scope(username, host, mailbox),),
+        )
