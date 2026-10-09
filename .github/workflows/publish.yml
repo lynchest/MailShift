@@ -7,33 +7,48 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest tests/ -q
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python -c 'import os, re; text = open("pyproject.toml").read(); version = re.search(r"(?m)^version = \"([^\"]+)\"", text)[1]; tag = os.environ["RELEASE_TAG"]; assert tag == f"v{version}", f"Tag {tag} does not match pyproject version {version}"'
+
   build-and-publish:
     name: Build package and publish to PyPI
+    needs: test
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # Required for PyPI Trusted Publishing (OIDC)
+      id-token: write
       contents: read
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
+          python-version: "3.14"
       - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install hatch
-
+        run: python -m pip install --upgrade pip build
       - name: Build package distributions
-        run: hatch build
-
+        run: python -m build
+      - name: Install wheel in a clean environment and smoke test
+        run: |
+          python -m venv /tmp/mailshift-wheel-test
+          /tmp/mailshift-wheel-test/bin/python -m pip install dist/*.whl
+          /tmp/mailshift-wheel-test/bin/mailshift --help
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
-          # If using API token instead of Trusted Publishing, define PYPI_API_TOKEN in repo secrets:
-          # password: ${{ secrets.PYPI_API_TOKEN }}

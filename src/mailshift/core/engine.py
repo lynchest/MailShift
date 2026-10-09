@@ -247,6 +247,7 @@ class MailEngine:
         self.cfg = cfg
         self._rl: RateLimitConfig = cfg.rate_limit
         self._conn: Optional[IMAPConnection] = None
+        self.action_cancel_reason: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Connection management
@@ -630,6 +631,7 @@ class MailEngine:
         progress_cb: Optional[Callable[[str], None]] = None,
     ) -> list[str]:
         assert self._conn, "Not connected"
+        self.action_cancel_reason = None
         rl = self._rl
         deleted: list[str] = []
         chunks = list(chunk_list(uids, rl.delete_chunk_size))
@@ -641,6 +643,7 @@ class MailEngine:
             try:
                 if _has_preexisting_deleted(self._conn):
                     log.warning("Pre-existing \\Deleted messages found; deletion cancelled to protect them")
+                    self.action_cancel_reason = "Önceden silinmiş iletiler bulundu; mevcut iletileri korumak için işlem iptal edildi."
                     return []
             except Exception as exc:
                 log.error(f"Cannot safely delete messages: {exc}")
@@ -775,6 +778,7 @@ class MailEngine:
         progress_cb: Optional[Callable[[str], None]] = None,
     ) -> list[str]:
         assert self._conn, "Not connected"
+        self.action_cancel_reason = None
         rl = self._rl
         folders = self._resolve_trash_folders(trash_folder)
         moved: list[str] = []
@@ -789,6 +793,7 @@ class MailEngine:
             try:
                 if _has_preexisting_deleted(self._conn):
                     log.warning("Pre-existing \\Deleted messages found; trash move cancelled to protect them")
+                    self.action_cancel_reason = "Önceden silinmiş iletiler bulundu; mevcut iletileri korumak için işlem iptal edildi."
                     return []
             except Exception as exc:
                 log.error(f"Cannot safely move messages to trash: {exc}")

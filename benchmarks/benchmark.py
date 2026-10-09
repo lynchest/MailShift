@@ -1,7 +1,10 @@
 import time
 import random
-from src.mailshift.models.models import MailMeta
-from src.mailshift.db.database import save_mails_cache, init_db, clear_mails_cache
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from mailshift.models.models import MailMeta
+from mailshift.db.database import save_mails_cache, init_db, clear_mails_cache
 
 def generate_dummy_mails(num):
     mails = []

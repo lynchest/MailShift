@@ -1,11 +1,13 @@
 import pytest
 from concurrent.futures import Future
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from mailshift.config.config import Mode
-from mailshift.models.models import MailMeta, ScanResult
+from mailshift.config.config import AppConfig, Mode, Provider, build_imap_config
+from mailshift.core.engine import MailEngine
+from mailshift.models.models import MailMeta, ScanResult, ScanStats
 from mailshift.main import clean_text, format_duration
 from mailshift.main import main as main_command
+from mailshift.main import _delete_or_move
 from mailshift.utils.hardware import WorkerPlan
 
 
@@ -570,3 +572,48 @@ def test_main_saves_power_probe_preference_when_cli_flag_is_set():
 
     save_pref.assert_called_once_with(True)
     assert worker_plan_resolver.call_args.kwargs["power_worker_probe"] is True
+
+
+def test_main_shows_preexisting_deleted_reason_when_action_is_cancelled():
+    class _CancelledEngine:
+        action_cancel_reason = "Önceden silinmiş iletiler bulundu; mevcut iletileri korumak için işlem iptal edildi."
+
+        def delete_mails(self, uids, progress_cb=None):
+            return []
+
+    cfg = AppConfig(
+        provider=Provider.GMAIL,
+        mode=Mode.FAST,
+        imap=build_imap_config(Provider.GMAIL, "user@gmail.com", "secret"),
+    )
+    result = ScanResult(
+        mail=MailMeta(uid="1", subject="Subject", sender="sender@example.com"),
+        decision="SIL",
+        reason="unit-test",
+    )
+    printed = []
+
+    with patch("mailshift.main.save_cleanup_log", return_value="cleanup.log"), \
+         patch("mailshift.main._prompt_unsubscribe"), \
+         patch("mailshift.main.console.print", side_effect=lambda *args, **kwargs: printed.extend(args)):
+        _delete_or_move(_CancelledEngine(), [result], ScanStats(), cfg, "1")
+
+    assert any(
+        "Önceden silinmiş iletiler bulundu" in str(getattr(item, "renderable", item))
+        for item in printed
+    )
+
+
+def test_engine_records_reason_when_preexisting_deleted_messages_cancel_delete():
+    engine = MailEngine(AppConfig(
+        provider=Provider.GMAIL,
+        mode=Mode.FAST,
+        imap=build_imap_config(Provider.GMAIL, "user@gmail.com", "secret"),
+    ))
+    conn = MagicMock()
+    conn.capabilities = (b"IMAP4REV1",)
+    conn.uid.return_value = ("OK", [b"8 9"])
+    engine._conn = conn
+
+    assert engine.delete_mails(["101"]) == []
+    assert "Önceden silinmiş iletiler bulundu" in engine.action_cancel_reason

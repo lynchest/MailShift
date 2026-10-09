@@ -122,11 +122,15 @@ pip install mailshift
 git clone https://github.com/lynchest/MailShift.git
 cd MailShift
 
-# Install dependencies
-pip install -r requirements.txt
+# Python 3.10 or newer is required
+py -3.14 -m pip install -e ".[dev]"  # Windows
+# python3.14 -m pip install -e ".[dev]"  # macOS/Linux
 
 # Run MailShift
-python main.py
+mailshift --help
+
+# Run tests locally (Python 3.14)
+py -3.14 -m pytest tests/ -q
 ```
 
 ---
@@ -380,7 +384,8 @@ MailShift/
 ├── blacklist.json               # Default junk keyword definitions
 ├── whitelist.json               # Default keep keyword definitions
 ├── pyproject.toml               # Package build specifications
-└── requirements.txt             # Python dependencies
+├── requirements.txt             # Development install shortcut
+└── benchmarks/                  # Local benchmark scripts
 ```
 
 ---

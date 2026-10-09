@@ -12,7 +12,7 @@
 ## Validation before finishing
 
 ```
-py -3.14 -m pytest tests/
+py -3.14 -m pytest tests/ -q (or python3.14 -m pytest tests/ -q)
 ```
 
 No other build or lint step is configured.
@@ -21,7 +21,7 @@ No other build or lint step is configured.
 
 ## Repo-specific conventions
 
-- **Python interpreter**: `py -3.14` — not `python`, not `python3`.
+- **Python support**: Python 3.10+. Local tests use `py -3.14` on Windows or `python3.14` elsewhere.
 - **Keyword lists**: `whitelist.json` and `blacklist.json` are plain JSON arrays at the project root. `JUNK_PATTERN` and `WHITELIST_PATTERN` are compiled once at import time in `config.py`. Runtime mutations via `add_to_blacklist()` / `add_to_whitelist()` update the JSON file but do **not** update the in-memory regex — a process restart is required for changes to take effect in analysis.
 - **Fast analyzer safety guards**: `fast_analyzer.py` has a built-in keep-guard that forces `TUT` for premium lifecycle expiry notices, verification-code/OTP mails, and Drive/cloud storage fullness alerts before junk matching. Keep this guard intact unless there is a stronger safety replacement.
 - **Fast analyzer order**: Decision flow is `has_attachment -> whitelist(TUT) -> safety-guard(TUT) -> blacklist(SIL) -> no match(TUT)`. Preserve this order unless a requirement explicitly changes it.
@@ -31,7 +31,7 @@ No other build or lint step is configured.
 - **Console output**: Use `from ui import console` (Rich console) for any new terminal output. Do not use bare `print()` — stdout is wrapped for UTF-8 on Windows and `print()` bypasses Rich's rendering.
 - **Progress UI stability**: Keep per-item progress labels short/sanitized (single-line, no control chars) and prefer ASCII status tags (`SIL`/`TUT`) over emoji to avoid wrapped/duplicated-looking progress bars in narrow Windows terminals.
 - **Logger stream**: Keep the console logger on `sys.stderr` so Rich progress output on stdout is not visually disrupted by warning/error logs.
-- **No YAML**: The project uses JSON throughout. `requirements.txt` does not include pyyaml.
+- **Configuration formats**: Application configuration uses JSON. GitHub Actions workflows use YAML; `requirements.txt` delegates dependency definitions to `pyproject.toml`.
 
 ## Important locations
 

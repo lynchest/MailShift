@@ -389,60 +389,8 @@ def verify_llm_health(cfg: AppConfig, selected_model: str) -> bool:
     return False
 
 
-@click.command(context_settings={"help_option_names": ["-h", "--help"]})
-@click.option("--provider", type=click.Choice(["gmail", "proton", "custom"]), default=None, help="Mail provider.")
-@click.option("--mode", type=click.Choice(["fast", "pro"]), default=None, help="Scan mode.")
-@click.option("--username", default=None, help="IMAP username / email address.")
-@click.option("--password", default=None, help="IMAP password.")
-@click.option("--host", default=None, help="Custom IMAP server host.")
-@click.option("--port", default=None, type=int, help="Custom IMAP server port.")
-@click.option("--use-ssl/--no-ssl", default=True, help="Use SSL for IMAP connection.")
-@click.option("--dry-run/--no-dry-run", default=True, show_default=True, help="Dry run (default: enabled).")
-@click.option("--scan-limit", default=None, type=int, help="Max number of messages to scan.")
-@click.option("--since", default=None, help="Scan only messages on/after date (YYYY-MM-DD or DD-Mon-YYYY).")
-@click.option("--before", default=None, help="Scan only messages before date (YYYY-MM-DD or DD-Mon-YYYY).")
-@click.option("--ollama-url", default="http://localhost:11434", show_default=True, help="Ollama API base URL.")
-@click.option("--ollama-model", default="qwen3.5:2B", show_default=True, help="Ollama model name.")
-@click.option("--ollama-prompt", default=None, help="Custom system prompt for Ollama.")
-@click.option("--uninstall", is_flag=True, help="Completely remove MailShift from this system.")
-@click.option("--history", is_flag=True, help="Show cleanup history from log files.")
-@click.option("--add-whitelist", "add_whitelist", default=None, help="Add a keyword to the whitelist.")
-@click.option("--remove-whitelist", "remove_whitelist", default=None, help="Remove a keyword from the whitelist.")
-@click.option("--add-blacklist", "add_blacklist", default=None, help="Add a keyword to the blacklist.")
-@click.option("--remove-blacklist", "remove_blacklist", default=None, help="Remove a keyword from the blacklist.")
-@click.option("--list-keywords", "list_keywords_flag", is_flag=True, help="List all whitelist and blacklist keywords.")
-@click.option("--export", "export_file", default=None, help="Export scan results to CSV or JSON file.")
-@click.option("--workers", "-w", type=int, default=None, help="Number of workers for parallel processing.")
-@click.option(
-    "--power-worker-probe/--no-power-worker-probe",
-    default=None,
-    help="Power-user hardware probe for worker auto tuning (saved for future runs).",
-)
-def main(
-    provider: Optional[str], mode: Optional[str], username: Optional[str],
-    password: Optional[str], host: Optional[str], port: Optional[int],
-    use_ssl: bool, dry_run: bool, scan_limit: Optional[int],
-    since: Optional[str], before: Optional[str],
-    ollama_url: str, ollama_model: str, ollama_prompt: Optional[str],
-    uninstall: bool, history: bool, add_whitelist: Optional[str],
-    remove_whitelist: Optional[str], add_blacklist: Optional[str],
-    remove_blacklist: Optional[str], list_keywords_flag: bool,
-    export_file: Optional[str], workers: Optional[int],
-    power_worker_probe: Optional[bool],
-) -> None:
-    """MailShift | privacy-first newsletter purger for Gmail and Proton Mail."""
-    log.info("Starting MailShift CLI")
-
-    # Early exits
-    if history:
-        return print_history()
-    if handle_keywords(list_keywords_flag, add_whitelist, remove_whitelist, add_blacklist, remove_blacklist):
-        return
-    if uninstall:
-        return handle_uninstall()
-
-    check_and_prompt_update(console)
-
+def _configure_scan(provider, mode, username, password, host, port, use_ssl, dry_run, scan_limit, since, before, ollama_url, ollama_model, ollama_prompt, workers, power_worker_probe):
+    """Run the  configure scan stage."""
     # Resolution & Setup
     resolved_provider = Provider(provider) if provider else prompt_provider()
     
@@ -560,6 +508,377 @@ def main(
     if cfg.mode == Mode.PRO:
         verify_llm_health(cfg, selected_model)
 
+
+    return cfg, worker_plan, selected_model, sys_info, power_worker_probe_enabled
+
+
+def _connect_and_list_uids(cfg: AppConfig, engine: MailEngine):
+    """Run the  connect and list uids stage."""
+    # ---- Connect & Fetch UIDs ----
+    with console.status("[cyan]Connecting to IMAP server…[/cyan]", spinner="dots"):
+        try:
+            engine.connect()
+        except Exception as exc:
+            console.print(f"[bold red]Connection failed:[/bold red] {exc}")
+            sys.exit(1)
+
+    with console.status("[cyan]Listing messages…[/cyan]", spinner="dots"):
+        current_uids = engine.list_uids()
+
+    if not current_uids:
+        clear_checkpoint(cfg.imap.username, cfg.imap.host, "INBOX")
+        return engine, []
+
+    console.print(f"[green]Found [bold]{len(current_uids)}[/bold] message(s) in INBOX.[/green]")
+    return engine, current_uids
+
+
+def _scan_and_analyze(engine: MailEngine, cfg: AppConfig, current_uids: list[str], cancel_event: threading.Event, worker_plan, selected_model: str, sys_info):
+    """Run the  scan and analyze stage."""
+    # ---- Cache Management ----
+    with console.status("[cyan]Loading matching cache rows…[/cyan]", spinner="dots"):
+        cached_mails = load_mails_cache_by_uids(current_uids)
+        
+    cached_dict = {m.uid: m for m in cached_mails}
+    missing_uids = [uid for uid in current_uids if uid not in cached_dict]
+    mails = [cached_dict[uid] for uid in current_uids if uid in cached_dict]
+    
+    if mails:
+        console.print(f"[cyan]Cache'den [bold]{len(mails)}[/bold] mail başlığı yüklendi.[/cyan]")
+
+    # ---- Fetch Missing Headers ----
+    if missing_uids:
+        console.print(f"[cyan]Sunucudan [bold]{len(missing_uids)}[/bold] yeni ileti başlığı çekiliyor…[/cyan]")
+        
+        with Progress(
+            SpinnerColumn(), TextColumn("[bold cyan]Fetching Headers[/bold cyan]"),
+            BarColumn(), TaskProgressColumn(), TextColumn("[dim]{task.fields[current]}[/dim]"),
+            TimeElapsedColumn(), console=console, transient=True
+        ) as progress:
+            task = progress.add_task("fetch", total=len(missing_uids), current="Starting…")
+            fetch_params = FetchProgressParams(
+                progress=progress,
+                task_id=task,
+                total_count=len(missing_uids),
+                clean_text_fn=clean_text,
+                format_duration_fn=format_duration,
+            )
+            fetch_handler = FetchProgressHandler(mails=mails, params=fetch_params)
+            engine.fetch_headers_concurrent(missing_uids, progress_cb=fetch_handler)
+        console.print("[green]Yeni başlıklar eklendi.[/green]")
+
+    save_mails_cache(mails)
+
+    # ---- Analysis Phase ----
+    if cfg.mode == Mode.PRO:
+        # Phase 1: Fast heuristic scan
+        fast_results: List[ScanResult] = []
+        with Progress(
+            SpinnerColumn(), TextColumn("[bold cyan]Phase 1 | Heuristic Scan[/bold cyan]"),
+            BarColumn(), TaskProgressColumn(), TextColumn("[dim]{task.fields[current]}[/dim]"),
+            TimeElapsedColumn(), TimeRemainingColumn(), console=console, transient=True
+        ) as progress:
+            task = progress.add_task("fast", total=len(mails), current="Starting…")
+            
+            for idx, mail in enumerate(mails, start=1):
+                res = fast_analyze(mail)
+                fast_results.append(res)
+                icon = "SIL" if res.decision == "SIL" else "TUT"
+                subj = clean_text(mail.subject, max_len=24)
+                
+                if idx % 20 == 0 or idx == len(mails):
+                    progress.update(task, advance=(idx % 20) or 20, current=f"{icon} {subj}")
+
+        sil_candidates = [r for r in fast_results if r.decision == "SIL"]
+        tut_results = [r for r in fast_results if r.decision == "TUT"]
+        console.print(f"[cyan]Phase 1 tamamlandı: [bold]{len(sil_candidates)}[/bold] şüpheli, [bold]{len(tut_results)}[/bold] güvenli.[/cyan]")
+
+        # Phase 2: LLM Verification
+        if sil_candidates:
+            need_body_mails = [r.mail for r in sil_candidates if not r.mail.body_preview]
+            if need_body_mails:
+                with console.status(f"[cyan]Pro mode: [bold]{len(need_body_mails)}[/bold] SIL adayı için body çekiliyor…[/cyan]", spinner="dots"):
+                    engine.fetch_body_for_cached_mails(need_body_mails, progress_cb=lambda m: None)
+
+            llm_verified: List[ScanResult] = []
+            max_workers = max(1, cfg.max_workers or 1)
+            llm_timeout_s = cfg.lm_studio.timeout if cfg.llm_backend == "lm_studio" else cfg.ollama.timeout
+            adaptive_workers = AdaptiveWorkerController(
+                initial_workers=max_workers,
+                max_workers=max_workers,
+                min_workers=1,
+                backend=cfg.llm_backend,
+                timeout_seconds=llm_timeout_s,
+            )
+            indexed_candidates = list(enumerate(sil_candidates))
+            
+            with Progress(
+                SpinnerColumn(), TextColumn("[bold magenta]Phase 2 | LLM Verification[/bold magenta]"),
+                BarColumn(), TaskProgressColumn(), TextColumn("[dim]{task.fields[current]}[/dim]"),
+                console=console, transient=True
+            ) as progress:
+                task = progress.add_task("llm", total=len(sil_candidates), current="Starting…")
+                phase2_start = time.perf_counter()
+                llm_worker = LLMWorker(cfg=cfg, cancel_event=cancel_event)
+
+                temp_results = [None] * len(sil_candidates)
+                done_count = 0
+                cursor = 0
+
+                while cursor < len(indexed_candidates):
+                    batch_workers = adaptive_workers.current_workers
+                    remaining_candidates = len(indexed_candidates) - cursor
+                    batch_size = min(remaining_candidates, max(batch_workers * 2, batch_workers))
+                    batch_items = indexed_candidates[cursor:cursor + batch_size]
+                    cursor += batch_size
+
+                    with ThreadPoolExecutor(max_workers=batch_workers) as executor:
+                        futures = {
+                            executor.submit(_run_llm_candidate, llm_worker, (idx, candidate)): idx
+                            for idx, candidate in batch_items
+                        }
+                        submitted_at = {future: time.perf_counter() for future in futures}
+
+                        for future in as_completed(futures):
+                            try:
+                                idx, res, latency_s = future.result()
+                                temp_results[idx] = res
+                                adaptive_workers.observe(latency_s, res.reason)
+
+                                subj = clean_text(res.mail.subject, max_len=24)
+                                icon = "SIL" if res.decision == "SIL" else "TUT"
+                                done_count += 1
+                                elapsed = max(0.001, time.perf_counter() - phase2_start)
+                                remaining = max(0.0, (len(sil_candidates) - done_count) * (elapsed / done_count))
+                                progress.update(
+                                    task,
+                                    advance=1,
+                                    current=f"{icon} {subj} | w:{batch_workers} | kalan {format_duration(remaining)}",
+                                )
+                            except Exception as exc:
+                                idx = futures[future]
+                                elapsed_s = max(0.0, time.perf_counter() - submitted_at[future])
+                                fallback = ScanResult(mail=sil_candidates[idx].mail, decision="TUT", reason=f"llm-error:{exc}")
+                                temp_results[idx] = fallback
+                                adaptive_workers.observe(elapsed_s, fallback.reason)
+
+                                done_count += 1
+                                elapsed = max(0.001, time.perf_counter() - phase2_start)
+                                remaining = max(0.0, (len(sil_candidates) - done_count) * (elapsed / done_count))
+                                progress.update(
+                                    task,
+                                    advance=1,
+                                    current=f"TUT hata | w:{batch_workers} | kalan {format_duration(remaining)}",
+                                )
+
+                    next_workers, adaptation_reason, snapshot = adaptive_workers.evaluate_window()
+                    if next_workers != batch_workers:
+                        log.warning(
+                            "Adaptive worker update: %s -> %s (timeout=%s, error=%s, p95=%.2fs; %s)",
+                            batch_workers,
+                            next_workers,
+                            f"{snapshot.timeout_rate:.1%}",
+                            f"{snapshot.error_rate:.1%}",
+                            snapshot.p95_latency_s,
+                            adaptation_reason,
+                        )
+                    else:
+                        log.debug(
+                            "Adaptive worker hold=%s (timeout=%s, error=%s, p95=%.2fs; %s)",
+                            batch_workers,
+                            f"{snapshot.timeout_rate:.1%}",
+                            f"{snapshot.error_rate:.1%}",
+                            snapshot.p95_latency_s,
+                            adaptation_reason,
+                        )
+
+                llm_verified = [r for r in temp_results if r is not None]
+                phase2_elapsed_s = max(0.001, time.perf_counter() - phase2_start)
+
+            llm_confirmed = sum(1 for r in llm_verified if r.decision == "SIL")
+            console.print(f"[magenta]Phase 2 tamamlandı: [bold]{llm_confirmed}[/bold] silme onaylandı, [bold]{len(llm_verified) - llm_confirmed}[/bold] kurtarıldı.[/magenta]")
+            phase2_snapshot = adaptive_workers.overall_snapshot()
+            console.print(
+                "[dim]Adaptif worker | "
+                f"başlangıç {max_workers} -> son {adaptive_workers.current_workers} | "
+                f"timeout {phase2_snapshot.timeout_rate:.1%} | "
+                f"hata {phase2_snapshot.error_rate:.1%} | "
+                f"p95 {phase2_snapshot.p95_latency_s:.1f}s[/dim]"
+            )
+
+            if worker_plan.source.startswith("auto"):
+                learned_worker = persist_worker_profile_run(
+                    model_name=selected_model,
+                    used_workers=adaptive_workers.current_workers,
+                    upper_limit=worker_plan.upper_limit,
+                    sample_count=phase2_snapshot.sample_count,
+                    timeout_rate=phase2_snapshot.timeout_rate,
+                    error_rate=phase2_snapshot.error_rate,
+                    p95_latency_s=phase2_snapshot.p95_latency_s,
+                    throughput=(phase2_snapshot.sample_count / phase2_elapsed_s),
+                    backend=cfg.llm_backend,
+                    mode=cfg.mode.value,
+                    system_info=sys_info,
+                )
+                if learned_worker is not None:
+                    console.print(
+                        f"[dim]Profil ogrenme | sonraki calismada onerilen worker: {learned_worker}[/dim]"
+                    )
+
+            scan_results = tut_results + llm_verified
+
+            if cfg.llm_backend == "lm_studio":
+                with console.status("[cyan]LM Studio modeli VRAM'den tahliye ediliyor…[/cyan]", spinner="dots"):
+                    unload_lm_studio_models(cfg.lm_studio.base_url, selected_model)
+        else:
+            scan_results = fast_results
+
+    else:
+        # Fast Mode Analysis
+        with Progress(
+            SpinnerColumn(), TextColumn("[bold cyan]Analyzing[/bold cyan]"),
+            BarColumn(), TaskProgressColumn(), TextColumn("[dim]{task.fields[current]}[/dim]"),
+            TimeElapsedColumn(), console=console, transient=True
+        ) as progress:
+            task = progress.add_task("analyze", total=len(mails), current="Starting…")
+            analyze_params = AnalyzeProgressParams(
+                progress=progress,
+                task_id=task,
+                total_count=len(mails),
+                clean_text_fn=clean_text,
+            )
+            analyze_handler = AnalyzeProgressHandler(
+                scan_results=scan_results, params=analyze_params
+            )
+            _, raw_stats = engine.analyze(mails, progress_cb=analyze_handler)
+
+
+    return scan_results
+
+
+def _display_results(to_delete: List[ScanResult], stats: ScanStats, cfg: AppConfig, export_file: Optional[str]) -> None:
+    """Present scan results and save the optional preview log."""
+    console.print(build_results_table(to_delete))
+    console.print(build_stats_panel(stats, cfg.dry_run))
+    if export_file:
+        export_scan_results(to_delete, export_file)
+    if cfg.dry_run:
+        log_file = save_cleanup_log(
+            to_delete, stats, cfg.provider.value, cfg.mode.value, dry_run=True, action="preview",
+        )
+        console.print(Panel(
+            f"[bold]{len(to_delete)}[/bold] mesaj silinebilir olarak işaretlendi.\n"
+            "[dim]Dry run modu — silmek için aşağıdan seçin, atlamak için İptal.[/dim]\n"
+            f"[dim]Log kaydedildi: {log_file}[/dim]",
+            title="[bold yellow]Dry Run Önizlemesi[/bold yellow]", border_style="yellow", box=box.ROUNDED,
+        ))
+
+
+def _delete_or_move(engine: MailEngine, to_delete: List[ScanResult], stats: ScanStats, cfg: AppConfig, choice: str) -> None:
+    """Delete messages, move them to trash, or skip the action."""
+    if choice in ("1", "2"):
+        trash_folder = {Provider.GMAIL: "[Gmail]/Trash", Provider.PROTON: "Trash"}.get(cfg.provider, "Trash")
+        delete_uids = [r.mail.uid for r in to_delete]
+        action_label = "Kalıcı Siliniyor" if choice == "1" else "Çöp Kutusuna Taşınıyor"
+
+        with Progress(
+            SpinnerColumn(), TextColumn(f"[bold red]{action_label}[/bold red]"),
+            BarColumn(), TaskProgressColumn(), TimeElapsedColumn(), console=console, transient=True
+        ) as progress:
+            del_task = progress.add_task("action", total=len(delete_uids))
+            cb = lambda _uid: progress.advance(del_task)
+
+            deleted = engine.delete_mails(delete_uids, progress_cb=cb) if choice == "1" else \
+                      engine.move_to_trash(delete_uids, trash_folder, progress_cb=cb)
+
+        deleted_results = [r for r in to_delete if r.mail.uid in deleted]
+        log_file = save_cleanup_log(
+            deleted_results,
+            stats,
+            cfg.provider.value,
+            cfg.mode.value,
+            dry_run=False,
+            action="delete" if choice == "1" else "trash",
+        )
+
+        if not deleted:
+            reason = getattr(engine, "action_cancel_reason", None)
+            detail = f"\n[bold yellow]{reason}[/bold yellow]" if reason else ""
+            console.print(Panel(
+                "[bold red]İşlem başarısız.[/bold red] Hiçbir mesaj işlenemedi.\n[dim]Sunucu izni veya klasör adı sorunlu olabilir. Log dosyasını inceleyin.[/dim]"
+                f"{detail}\n[dim]Log kaydedildi: {log_file}[/dim]", title="[bold red]Hata[/bold red]", border_style="red", box=box.ROUNDED
+            ))
+        else:
+            console.print(Panel(
+                f"[bold green]✔ {len(deleted)} mesaj {'kalıcı olarak silindi' if choice == '1' else 'çöp kutusuna taşındı'}.[/bold green]\n"
+                f"[dim]Log kaydedildi: {log_file}[/dim]", title="[bold green]İşlem Tamamlandı[/bold green]", border_style="green", box=box.ROUNDED
+            ))
+        _prompt_unsubscribe(to_delete)
+    else:
+        _prompt_unsubscribe(to_delete)
+        console.print("[yellow]İşlem iptal edildi.[/yellow]")
+
+
+
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--provider", type=click.Choice(["gmail", "proton", "custom"]), default=None, help="Mail provider.")
+@click.option("--mode", type=click.Choice(["fast", "pro"]), default=None, help="Scan mode.")
+@click.option("--username", default=None, help="IMAP username / email address.")
+@click.option("--password", default=None, help="IMAP password.")
+@click.option("--host", default=None, help="Custom IMAP server host.")
+@click.option("--port", default=None, type=int, help="Custom IMAP server port.")
+@click.option("--use-ssl/--no-ssl", default=True, help="Use SSL for IMAP connection.")
+@click.option("--dry-run/--no-dry-run", default=True, show_default=True, help="Dry run (default: enabled).")
+@click.option("--scan-limit", default=None, type=int, help="Max number of messages to scan.")
+@click.option("--since", default=None, help="Scan only messages on/after date (YYYY-MM-DD or DD-Mon-YYYY).")
+@click.option("--before", default=None, help="Scan only messages before date (YYYY-MM-DD or DD-Mon-YYYY).")
+@click.option("--ollama-url", default="http://localhost:11434", show_default=True, help="Ollama API base URL.")
+@click.option("--ollama-model", default="qwen3.5:2B", show_default=True, help="Ollama model name.")
+@click.option("--ollama-prompt", default=None, help="Custom system prompt for Ollama.")
+@click.option("--uninstall", is_flag=True, help="Completely remove MailShift from this system.")
+@click.option("--history", is_flag=True, help="Show cleanup history from log files.")
+@click.option("--add-whitelist", "add_whitelist", default=None, help="Add a keyword to the whitelist.")
+@click.option("--remove-whitelist", "remove_whitelist", default=None, help="Remove a keyword from the whitelist.")
+@click.option("--add-blacklist", "add_blacklist", default=None, help="Add a keyword to the blacklist.")
+@click.option("--remove-blacklist", "remove_blacklist", default=None, help="Remove a keyword from the blacklist.")
+@click.option("--list-keywords", "list_keywords_flag", is_flag=True, help="List all whitelist and blacklist keywords.")
+@click.option("--export", "export_file", default=None, help="Export scan results to CSV or JSON file.")
+@click.option("--workers", "-w", type=int, default=None, help="Number of workers for parallel processing.")
+@click.option(
+    "--power-worker-probe/--no-power-worker-probe",
+    default=None,
+    help="Power-user hardware probe for worker auto tuning (saved for future runs).",
+)
+def main(
+    provider: Optional[str], mode: Optional[str], username: Optional[str],
+    password: Optional[str], host: Optional[str], port: Optional[int],
+    use_ssl: bool, dry_run: bool, scan_limit: Optional[int],
+    since: Optional[str], before: Optional[str],
+    ollama_url: str, ollama_model: str, ollama_prompt: Optional[str],
+    uninstall: bool, history: bool, add_whitelist: Optional[str],
+    remove_whitelist: Optional[str], add_blacklist: Optional[str],
+    remove_blacklist: Optional[str], list_keywords_flag: bool,
+    export_file: Optional[str], workers: Optional[int],
+    power_worker_probe: Optional[bool],
+) -> None:
+    """MailShift | privacy-first newsletter purger for Gmail and Proton Mail."""
+    log.info("Starting MailShift CLI")
+
+    # Early exits
+    if history:
+        return print_history()
+    if handle_keywords(list_keywords_flag, add_whitelist, remove_whitelist, add_blacklist, remove_blacklist):
+        return
+    if uninstall:
+        return handle_uninstall()
+
+    check_and_prompt_update(console)
+
+    cfg, worker_plan, selected_model, sys_info, power_worker_probe_enabled = _configure_scan(
+        provider, mode, username, password, host, port, use_ssl, dry_run, scan_limit,
+        since, before, ollama_url, ollama_model, ollama_prompt, workers, power_worker_probe,
+    )
+
     # Core Execution Initialization
     engine: Optional[MailEngine] = None
     cancel_event = threading.Event()
@@ -570,241 +889,14 @@ def main(
         if not ensure_proton_bridge_ready(cfg):
             console.print("[bold red]Proton Bridge bağlantısı kurulamadı. İşlem iptal edildi.[/bold red]")
             sys.exit(1)
-
-        # ---- Connect & Fetch UIDs ----
-        with console.status("[cyan]Connecting to IMAP server…[/cyan]", spinner="dots"):
-            try:
-                engine = MailEngine(cfg)
-                engine.connect()
-            except Exception as exc:
-                console.print(f"[bold red]Connection failed:[/bold red] {exc}")
-                sys.exit(1)
-
-        with console.status("[cyan]Listing messages…[/cyan]", spinner="dots"):
-            current_uids = engine.list_uids()
-
+        engine = MailEngine(cfg)
+        _, current_uids = _connect_and_list_uids(cfg, engine)
         if not current_uids:
-            clear_checkpoint(cfg.imap.username, cfg.imap.host, "INBOX")
             return console.print("[yellow]No messages found in INBOX.[/yellow]")
 
-        console.print(f"[green]Found [bold]{len(current_uids)}[/bold] message(s) in INBOX.[/green]")
-        
-        # ---- Cache Management ----
-        with console.status("[cyan]Loading matching cache rows…[/cyan]", spinner="dots"):
-            cached_mails = load_mails_cache_by_uids(current_uids)
-            
-        cached_dict = {m.uid: m for m in cached_mails}
-        missing_uids = [uid for uid in current_uids if uid not in cached_dict]
-        mails = [cached_dict[uid] for uid in current_uids if uid in cached_dict]
-        
-        if mails:
-            console.print(f"[cyan]Cache'den [bold]{len(mails)}[/bold] mail başlığı yüklendi.[/cyan]")
-
-        # ---- Fetch Missing Headers ----
-        if missing_uids:
-            console.print(f"[cyan]Sunucudan [bold]{len(missing_uids)}[/bold] yeni ileti başlığı çekiliyor…[/cyan]")
-            
-            with Progress(
-                SpinnerColumn(), TextColumn("[bold cyan]Fetching Headers[/bold cyan]"),
-                BarColumn(), TaskProgressColumn(), TextColumn("[dim]{task.fields[current]}[/dim]"),
-                TimeElapsedColumn(), console=console, transient=True
-            ) as progress:
-                task = progress.add_task("fetch", total=len(missing_uids), current="Starting…")
-                fetch_params = FetchProgressParams(
-                    progress=progress,
-                    task_id=task,
-                    total_count=len(missing_uids),
-                    clean_text_fn=clean_text,
-                    format_duration_fn=format_duration,
-                )
-                fetch_handler = FetchProgressHandler(mails=mails, params=fetch_params)
-                engine.fetch_headers_concurrent(missing_uids, progress_cb=fetch_handler)
-            console.print("[green]Yeni başlıklar eklendi.[/green]")
-
-        save_mails_cache(mails)
-
-        # ---- Analysis Phase ----
-        if cfg.mode == Mode.PRO:
-            # Phase 1: Fast heuristic scan
-            fast_results: List[ScanResult] = []
-            with Progress(
-                SpinnerColumn(), TextColumn("[bold cyan]Phase 1 | Heuristic Scan[/bold cyan]"),
-                BarColumn(), TaskProgressColumn(), TextColumn("[dim]{task.fields[current]}[/dim]"),
-                TimeElapsedColumn(), TimeRemainingColumn(), console=console, transient=True
-            ) as progress:
-                task = progress.add_task("fast", total=len(mails), current="Starting…")
-                
-                for idx, mail in enumerate(mails, start=1):
-                    res = fast_analyze(mail)
-                    fast_results.append(res)
-                    icon = "SIL" if res.decision == "SIL" else "TUT"
-                    subj = clean_text(mail.subject, max_len=24)
-                    
-                    if idx % 20 == 0 or idx == len(mails):
-                        progress.update(task, advance=(idx % 20) or 20, current=f"{icon} {subj}")
-
-            sil_candidates = [r for r in fast_results if r.decision == "SIL"]
-            tut_results = [r for r in fast_results if r.decision == "TUT"]
-            console.print(f"[cyan]Phase 1 tamamlandı: [bold]{len(sil_candidates)}[/bold] şüpheli, [bold]{len(tut_results)}[/bold] güvenli.[/cyan]")
-
-            # Phase 2: LLM Verification
-            if sil_candidates:
-                need_body_mails = [r.mail for r in sil_candidates if not r.mail.body_preview]
-                if need_body_mails:
-                    with console.status(f"[cyan]Pro mode: [bold]{len(need_body_mails)}[/bold] SIL adayı için body çekiliyor…[/cyan]", spinner="dots"):
-                        engine.fetch_body_for_cached_mails(need_body_mails, progress_cb=lambda m: None)
-
-                llm_verified: List[ScanResult] = []
-                max_workers = max(1, cfg.max_workers or 1)
-                llm_timeout_s = cfg.lm_studio.timeout if cfg.llm_backend == "lm_studio" else cfg.ollama.timeout
-                adaptive_workers = AdaptiveWorkerController(
-                    initial_workers=max_workers,
-                    max_workers=max_workers,
-                    min_workers=1,
-                    backend=cfg.llm_backend,
-                    timeout_seconds=llm_timeout_s,
-                )
-                indexed_candidates = list(enumerate(sil_candidates))
-                
-                with Progress(
-                    SpinnerColumn(), TextColumn("[bold magenta]Phase 2 | LLM Verification[/bold magenta]"),
-                    BarColumn(), TaskProgressColumn(), TextColumn("[dim]{task.fields[current]}[/dim]"),
-                    console=console, transient=True
-                ) as progress:
-                    task = progress.add_task("llm", total=len(sil_candidates), current="Starting…")
-                    phase2_start = time.perf_counter()
-                    llm_worker = LLMWorker(cfg=cfg, cancel_event=cancel_event)
-
-                    temp_results = [None] * len(sil_candidates)
-                    done_count = 0
-                    cursor = 0
-
-                    while cursor < len(indexed_candidates):
-                        batch_workers = adaptive_workers.current_workers
-                        remaining_candidates = len(indexed_candidates) - cursor
-                        batch_size = min(remaining_candidates, max(batch_workers * 2, batch_workers))
-                        batch_items = indexed_candidates[cursor:cursor + batch_size]
-                        cursor += batch_size
-
-                        with ThreadPoolExecutor(max_workers=batch_workers) as executor:
-                            futures = {
-                                executor.submit(_run_llm_candidate, llm_worker, (idx, candidate)): idx
-                                for idx, candidate in batch_items
-                            }
-                            submitted_at = {future: time.perf_counter() for future in futures}
-
-                            for future in as_completed(futures):
-                                try:
-                                    idx, res, latency_s = future.result()
-                                    temp_results[idx] = res
-                                    adaptive_workers.observe(latency_s, res.reason)
-
-                                    subj = clean_text(res.mail.subject, max_len=24)
-                                    icon = "SIL" if res.decision == "SIL" else "TUT"
-                                    done_count += 1
-                                    elapsed = max(0.001, time.perf_counter() - phase2_start)
-                                    remaining = max(0.0, (len(sil_candidates) - done_count) * (elapsed / done_count))
-                                    progress.update(
-                                        task,
-                                        advance=1,
-                                        current=f"{icon} {subj} | w:{batch_workers} | kalan {format_duration(remaining)}",
-                                    )
-                                except Exception as exc:
-                                    idx = futures[future]
-                                    elapsed_s = max(0.0, time.perf_counter() - submitted_at[future])
-                                    fallback = ScanResult(mail=sil_candidates[idx].mail, decision="TUT", reason=f"llm-error:{exc}")
-                                    temp_results[idx] = fallback
-                                    adaptive_workers.observe(elapsed_s, fallback.reason)
-
-                                    done_count += 1
-                                    elapsed = max(0.001, time.perf_counter() - phase2_start)
-                                    remaining = max(0.0, (len(sil_candidates) - done_count) * (elapsed / done_count))
-                                    progress.update(
-                                        task,
-                                        advance=1,
-                                        current=f"TUT hata | w:{batch_workers} | kalan {format_duration(remaining)}",
-                                    )
-
-                        next_workers, adaptation_reason, snapshot = adaptive_workers.evaluate_window()
-                        if next_workers != batch_workers:
-                            log.warning(
-                                "Adaptive worker update: %s -> %s (timeout=%s, error=%s, p95=%.2fs; %s)",
-                                batch_workers,
-                                next_workers,
-                                f"{snapshot.timeout_rate:.1%}",
-                                f"{snapshot.error_rate:.1%}",
-                                snapshot.p95_latency_s,
-                                adaptation_reason,
-                            )
-                        else:
-                            log.debug(
-                                "Adaptive worker hold=%s (timeout=%s, error=%s, p95=%.2fs; %s)",
-                                batch_workers,
-                                f"{snapshot.timeout_rate:.1%}",
-                                f"{snapshot.error_rate:.1%}",
-                                snapshot.p95_latency_s,
-                                adaptation_reason,
-                            )
-
-                    llm_verified = [r for r in temp_results if r is not None]
-                    phase2_elapsed_s = max(0.001, time.perf_counter() - phase2_start)
-
-                llm_confirmed = sum(1 for r in llm_verified if r.decision == "SIL")
-                console.print(f"[magenta]Phase 2 tamamlandı: [bold]{llm_confirmed}[/bold] silme onaylandı, [bold]{len(llm_verified) - llm_confirmed}[/bold] kurtarıldı.[/magenta]")
-                phase2_snapshot = adaptive_workers.overall_snapshot()
-                console.print(
-                    "[dim]Adaptif worker | "
-                    f"başlangıç {max_workers} -> son {adaptive_workers.current_workers} | "
-                    f"timeout {phase2_snapshot.timeout_rate:.1%} | "
-                    f"hata {phase2_snapshot.error_rate:.1%} | "
-                    f"p95 {phase2_snapshot.p95_latency_s:.1f}s[/dim]"
-                )
-
-                if worker_plan.source.startswith("auto"):
-                    learned_worker = persist_worker_profile_run(
-                        model_name=selected_model,
-                        used_workers=adaptive_workers.current_workers,
-                        upper_limit=worker_plan.upper_limit,
-                        sample_count=phase2_snapshot.sample_count,
-                        timeout_rate=phase2_snapshot.timeout_rate,
-                        error_rate=phase2_snapshot.error_rate,
-                        p95_latency_s=phase2_snapshot.p95_latency_s,
-                        throughput=(phase2_snapshot.sample_count / phase2_elapsed_s),
-                        backend=cfg.llm_backend,
-                        mode=cfg.mode.value,
-                        system_info=sys_info,
-                    )
-                    if learned_worker is not None:
-                        console.print(
-                            f"[dim]Profil ogrenme | sonraki calismada onerilen worker: {learned_worker}[/dim]"
-                        )
-
-                scan_results = tut_results + llm_verified
-
-                if cfg.llm_backend == "lm_studio":
-                    with console.status("[cyan]LM Studio modeli VRAM'den tahliye ediliyor…[/cyan]", spinner="dots"):
-                        unload_lm_studio_models(cfg.lm_studio.base_url, selected_model)
-            else:
-                scan_results = fast_results
-
-        else:
-            # Fast Mode Analysis
-            with Progress(
-                SpinnerColumn(), TextColumn("[bold cyan]Analyzing[/bold cyan]"),
-                BarColumn(), TaskProgressColumn(), TextColumn("[dim]{task.fields[current]}[/dim]"),
-                TimeElapsedColumn(), console=console, transient=True
-            ) as progress:
-                task = progress.add_task("analyze", total=len(mails), current="Starting…")
-                analyze_params = AnalyzeProgressParams(
-                    progress=progress,
-                    task_id=task,
-                    total_count=len(mails),
-                    clean_text_fn=clean_text,
-                )
-                analyze_handler = AnalyzeProgressHandler(
-                    scan_results=scan_results, params=analyze_params
-                )
-                _, raw_stats = engine.analyze(mails, progress_cb=analyze_handler)
+        scan_results = _scan_and_analyze(
+            engine, cfg, current_uids, cancel_event, worker_plan, selected_model, sys_info
+        )
 
         # Build final stats object
         clear_checkpoint(cfg.imap.username, cfg.imap.host, "INBOX")
@@ -821,73 +913,13 @@ def main(
         if not to_delete:
             return console.print(Panel("[green]No junk messages detected. Your inbox looks clean! 🎉[/green]", border_style="green", box=box.ROUNDED))
             
-        console.print(build_results_table(to_delete))
-        console.print(build_stats_panel(stats, cfg.dry_run))
-
-        if export_file:
-            export_scan_results(to_delete, export_file)
-
-        # Dry-run modundaysa önizleme logu kaydet ve bilgilendirme paneli göster,
-        # ardından silme menüsüne düş (return yok — kullanıcı devam edebilir).
-        if cfg.dry_run:
-            log_file = save_cleanup_log(
-                to_delete,
-                stats,
-                cfg.provider.value,
-                cfg.mode.value,
-                dry_run=True,
-                action="preview",
-            )
-            console.print(Panel(
-                f"[bold]{len(to_delete)}[/bold] mesaj silinebilir olarak işaretlendi.\n"
-                "[dim]Dry run modu — silmek için aşağıdan seçin, atlamak için İptal.[/dim]\n"
-                f"[dim]Log kaydedildi: {log_file}[/dim]",
-                title="[bold yellow]Dry Run Önizlemesi[/bold yellow]", border_style="yellow", box=box.ROUNDED
-            ))
+        _display_results(to_delete, stats, cfg, export_file)
 
         console.print("\n  [bold cyan][1][/bold cyan] Kalıcı Sil  [dim](geri alınamaz)[/dim]\n  [bold cyan][2][/bold cyan] Çöp Kutusuna Gönder\n  [bold cyan][3][/bold cyan] İptal\n")
         choice = Prompt.ask(f"[bold]{len(to_delete)} mesaj için ne yapmak istersiniz?[/bold]", choices=["1", "2", "3"], default="3")
         clear_console()
 
-        if choice in ("1", "2"):
-            trash_folder = {Provider.GMAIL: "[Gmail]/Trash", Provider.PROTON: "Trash"}.get(cfg.provider, "Trash")
-            delete_uids = [r.mail.uid for r in to_delete]
-            action_label = "Kalıcı Siliniyor" if choice == "1" else "Çöp Kutusuna Taşınıyor"
-
-            with Progress(
-                SpinnerColumn(), TextColumn(f"[bold red]{action_label}[/bold red]"),
-                BarColumn(), TaskProgressColumn(), TimeElapsedColumn(), console=console, transient=True
-            ) as progress:
-                del_task = progress.add_task("action", total=len(delete_uids))
-                cb = lambda _uid: progress.advance(del_task)
-
-                deleted = engine.delete_mails(delete_uids, progress_cb=cb) if choice == "1" else \
-                          engine.move_to_trash(delete_uids, trash_folder, progress_cb=cb)
-
-            deleted_results = [r for r in to_delete if r.mail.uid in deleted]
-            log_file = save_cleanup_log(
-                deleted_results,
-                stats,
-                cfg.provider.value,
-                cfg.mode.value,
-                dry_run=False,
-                action="delete" if choice == "1" else "trash",
-            )
-
-            if not deleted:
-                console.print(Panel(
-                    "[bold red]İşlem başarısız.[/bold red] Hiçbir mesaj işlenemedi.\n[dim]Sunucu izni veya klasör adı sorunlu olabilir. Log dosyasını inceleyin.[/dim]\n"
-                    f"[dim]Log kaydedildi: {log_file}[/dim]", title="[bold red]Hata[/bold red]", border_style="red", box=box.ROUNDED
-                ))
-            else:
-                console.print(Panel(
-                    f"[bold green]✔ {len(deleted)} mesaj {'kalıcı olarak silindi' if choice == '1' else 'çöp kutusuna taşındı'}.[/bold green]\n"
-                    f"[dim]Log kaydedildi: {log_file}[/dim]", title="[bold green]İşlem Tamamlandı[/bold green]", border_style="green", box=box.ROUNDED
-                ))
-            _prompt_unsubscribe(to_delete)
-        else:
-            _prompt_unsubscribe(to_delete)
-            console.print("[yellow]İşlem iptal edildi.[/yellow]")
+        _delete_or_move(engine, to_delete, stats, cfg, choice)
 
     except KeyboardInterrupt:
         log.warning("Process interrupted by user (KeyboardInterrupt)")
